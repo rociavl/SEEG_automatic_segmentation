@@ -392,7 +392,7 @@ inputVolume = slicer.util.getNode('ctp.3D')
 inputROI = slicer.util.getNode('p1_PRUEBA')  # Norm Mask 
 
 # Define the output directory
-outputDir = r'C:\\Users\\rocia\\Downloads\\TFG\\Cohort\\Enhance_ctp_tests'  # Replace with the desired directory path
+outputDir = r'C:\\Users\\rocia\\Downloads\\TFG\\Cohort\\Enhance_ctp_tests'  
 
 # Test the function with 'all' methods
 enhancedVolumeNodes = enhance_ctp(inputVolume, inputROI, methods='all', outputDir=outputDir)
