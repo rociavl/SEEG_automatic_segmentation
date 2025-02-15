@@ -8,6 +8,7 @@ import pywt
 import pywt.data
 import os
 import matplotlib.pyplot as plt
+import SimpleITK as sitk
 
 def enhance_ctp(inputVolume, inputROI, methods, outputDir=None):
     methods ='all'
@@ -25,12 +26,74 @@ def enhance_ctp(inputVolume, inputROI, methods, outputDir=None):
     # Ensure ROI is binary (mask), converting to 0s and 1s
     roi_array = np.uint8(roi_array > 0)
 
-    # Ensure the ROI and input volume are the same shape
+    print(f"Shape of input volume: {volume_array.shape}")  
+    print(f"Shape of ROI mask: {roi_array.shape}")
+
+
+   # Check if the shapes match
     if roi_array.shape != volume_array.shape:
-        print("ROI and input volume shapes do not match.")
-        return None
+        print("ROI and input volume shapes do not match. Resampling ROI to match input volume (using SimpleITK)...")
+
+        # Get the spacing, origin, and dimensions of the input volume
+        reference_spacing = inputVolume.GetSpacing()
+        reference_origin = inputVolume.GetOrigin()
+        reference_size = volume_array.shape  # (x, y, z) dimensions
+
+        print(f"Reference Spacing: {reference_spacing}")
+        print(f"Reference Origin: {reference_origin}")
+        print(f"Reference Dimensions: {reference_size}")
+
+        # Get the ROI data as a NumPy array
+        roi_array = slicer.util.arrayFromVolume(inputROI)
+
+        # Transpose the ROI array *before* converting to SimpleITK
+        roi_array = np.transpose(roi_array)
+
+        # Convert ROI array to SimpleITK image
+        roi_image_sitk = sitk.GetImageFromArray(roi_array)
+        roi_image_sitk.SetSpacing(inputROI.GetSpacing())
+        roi_image_sitk.SetOrigin(inputROI.GetOrigin())
+
+        # Create SimpleITK image for the reference volume (for geometry)
+        reference_image_sitk = sitk.Image(reference_size, sitk.sitkUInt8)  # Create an empty image
+        reference_image_sitk.SetSpacing(reference_spacing)
+        reference_image_sitk.SetOrigin(reference_origin)
+
+        # Resample the ROI using SimpleITK
+        resampler = sitk.ResampleImageFilter()
+        resampler.SetReferenceImage(reference_image_sitk)  # Match geometry
+        resampler.SetInterpolator(sitk.sitkNearestNeighbor)  # Preserve binary values
+        resampler.SetOutputPixelType(sitk.sitkUInt8)
+        resampled_roi_image_sitk = resampler.Execute(roi_image_sitk)
+
+        # Convert the resampled SimpleITK image back to a NumPy array
+        resampled_roi_array = sitk.GetArrayFromImage(resampled_roi_image_sitk)
+
+        # Transpose the array *after* resampling
+        resampled_roi_array = np.transpose(resampled_roi_array)
+
+        resampled_roi_array = np.uint8(resampled_roi_array > 0) # Ensure binary
+
+        print(f"Resampled ROI shape: {resampled_roi_array.shape}")
+
+        roi_array = resampled_roi_array # Update roi_array
+
+        # Ensure that the shapes match after resampling
+        if roi_array.shape != volume_array.shape:
+            print("Resampling failed. Shapes still do not match.")
+            print(f"Volume shape: {volume_array.shape}, Resampled ROI shape: {roi_array.shape}")
+            return None
+
+        print("ROI successfully resampled (using SimpleITK).")
+
+    else:
+        print("ROI and input volume shapes already match.")
+
+
+
 
     # Extract the region of interest from the input volume using the binary mask
+        
     roi_volume = volume_array * roi_array
 
 
@@ -43,9 +106,8 @@ def enhance_ctp(inputVolume, inputROI, methods, outputDir=None):
             enhanced_slices[i] = clahe.apply(roi_volume_scaled[i])
         return enhanced_slices
 
-    def gamma_correction(roi_volume):
+    def gamma_correction(roi_volume, gamma=1.8):
         roi_volume_rescaled = rescale_intensity(roi_volume, in_range='image', out_range=(0, 1))
-        gamma = 1.4
         gamma_corrected = exposure.adjust_gamma(roi_volume_rescaled, gamma=gamma)
         return np.uint8(np.clip(gamma_corrected * 255, 0, 255))
 
@@ -289,7 +351,7 @@ def enhance_ctp(inputVolume, inputROI, methods, outputDir=None):
             edge_slices[i] = cv2.Canny(blurred_image, low_threshold, high_threshold)
 
         return edge_slices
-    def log_transform(roi_volume, c=1.0):
+    def log_transform(roi_volume, c=5):
         # Apply a log transformation to enhance the brightness
         roi_volume_log = c * np.log(1 + roi_volume)
         
@@ -306,7 +368,7 @@ def enhance_ctp(inputVolume, inputROI, methods, outputDir=None):
     if methods == 'all':
         enhanced_volumes['local_otsu'] = local_otsu(roi_volume)
         enhanced_volumes['local_threshold'] = local_threshold(roi_volume)
-        enhanced_volumes['gamma_correction'] = gamma_correction(roi_volume)
+        enhanced_volumes['gamma_correction'] = gamma_correction(roi_volume, gamma=1.8)
         
         # Noise reduction
         enhanced_volumes['bilateral_filter'] = bilateral_filter(enhanced_volumes['gamma_correction'])
@@ -325,7 +387,18 @@ def enhance_ctp(inputVolume, inputROI, methods, outputDir=None):
         enhanced_volumes['morphological_filter_opening'] = morph_operations(enhanced_volumes['Sharpen_Laplacian_sharpen'])
         enhanced_volumes['morphological_filter_closing'] = morph_operations(enhanced_volumes['morphological_filter_opening'], operation='close')
 
+        # # Enhance the contrast
+        enhanced_volumes['gamma_2'] = gamma_correction(enhanced_volumes['morphological_filter_closing'], gamma=1.5)
+        enhanced_volumes['clahe_2'] = apply_clahe(enhanced_volumes['gamma_2'])
+        enhanced_volumes['gamma_3'] = gamma_correction(enhanced_volumes['clahe_2'])
+        enhanced_volumes['sharpen_2'] = sharpen_high_pass(enhanced_volumes['gamma_3'])
 
+        # # Morphological operations
+        enhanced_volumes['morphological_filter_opening_2'] = morph_operations(enhanced_volumes['sharpen_2'])
+        enhanced_volumes['morphological_filter_closing_2'] = morph_operations(enhanced_volumes['morphological_filter_opening_2'], operation='close')
+        enhanced_volumes['morphological_filter_opening_3'] = morph_operations(enhanced_volumes['morphological_filter_closing_2'])
+        enhanced_volumes['sharpen_3'] = sharpen_high_pass(enhanced_volumes['morphological_filter_opening_3'])
+        enhanced_volumes['morphological_filter_closing_3'] = morph_operations(enhanced_volumes['sharpen_3'], operation='close')
         # enhanced_volumes['morphological_filter_closing_no_points'] = morph_operations(enhanced_volumes['morphological_filter_closing'], kernel_size=3,operation='close')
         # enhanced_volumes['morphological_filter_closing_2'] = morph_operations(enhanced_volumes['morphological_filter_closing'], operation='close')
         # enhanced_volumes['morphological_filter_opening_2'] = morph_operations(enhanced_volumes['morphological_filter_closing_2'])
@@ -350,7 +423,7 @@ def enhance_ctp(inputVolume, inputROI, methods, outputDir=None):
 
     # Set output directory (maybe the user doesn't have write access to the default output directory)
     if outputDir is None:
-        outputDir = slicer.app.temporaryPath()  # Default to Slicer's temporary directory if no output path is provided
+        outputDir = slicer.app.temporaryPath()  
     
     if not os.path.exists(outputDir):
         os.makedirs(outputDir)
@@ -358,7 +431,7 @@ def enhance_ctp(inputVolume, inputROI, methods, outputDir=None):
     # Process each enhanced volume
     enhancedVolumeNodes = {}
     for method_name, enhanced_image in enhanced_volumes.items():
-        # Create new volume node for each enhanced image
+        # Create a new volume node to store the enhanced image data
         enhancedVolumeNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLScalarVolumeNode")
         enhancedVolumeNode.SetName(f"Enhanced_{method_name}_{inputVolume.GetName()}")
 
@@ -368,11 +441,11 @@ def enhance_ctp(inputVolume, inputROI, methods, outputDir=None):
 
         # Get and set the IJK to RAS transformation matrix
         ijkToRasMatrix = vtk.vtkMatrix4x4()
-        inputVolume.GetIJKToRASMatrix(ijkToRasMatrix)  # Retrieve the matrix from the input volume
-        enhancedVolumeNode.SetIJKToRASMatrix(ijkToRasMatrix)  # Apply the same matrix to the enhanced volume
+        inputVolume.GetIJKToRASMatrix(ijkToRasMatrix)  
+        enhancedVolumeNode.SetIJKToRASMatrix(ijkToRasMatrix) 
 
 
-        # Update the enhanced volume node with the enhanced image data
+        # Update the volume node with the enhanced image data
         slicer.util.updateVolumeFromArray(enhancedVolumeNode, enhanced_image)
       
         
@@ -388,15 +461,21 @@ def enhance_ctp(inputVolume, inputROI, methods, outputDir=None):
 
 
 # Load the input volume and ROI
-inputVolume = slicer.util.getNode('ctp.3D')  
-inputROI = slicer.util.getNode('p1_PRUEBA')  # Norm Mask 
+# inputVolume = slicer.util.getNode('CTp.3D')  
+# inputROI = slicer.util.getNode('4_mask_test')  # Brain Mask 
 
-# Define the output directory
-outputDir = r'C:\\Users\\rocia\\Downloads\\TFG\\Cohort\\Enhance_ctp_tests'  
+# # Output directory
+# outputDir = r'C:\\Users\\rocia\\Downloads\\TFG\\Cohort\\Enhance_ctp_tests\\P4'  
 
-# Test the function with 'all' methods
-enhancedVolumeNodes = enhance_ctp(inputVolume, inputROI, methods='all', outputDir=outputDir)
+# # Test the function 
+# enhancedVolumeNodes = enhance_ctp(inputVolume, inputROI, methods='all', outputDir=outputDir)
 
-# Access the enhanced volume nodes
-for method, volume_node in enhancedVolumeNodes.items():
-    print(f"Enhanced volume for method '{method}': {volume_node.GetName()}")
+# # Access the enhanced volume nodes
+# for method, volume_node in enhancedVolumeNodes.items():
+#     if volume_node is not None:
+#         print(f"Enhanced volume for method '{method}': {volume_node.GetName()}")
+#     else:
+#         print(f"Enhanced volume for method '{method}': No volume node available.")
+
+
+#exec(open('C:/Users/rocia/AppData/Local/slicer.org/Slicer 5.6.2/SEEG_module/SEEG_masking/enhance_ctp.py').read())

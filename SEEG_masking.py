@@ -20,11 +20,18 @@ from slicer.parameterNodeWrapper import (
 
 from slicer import vtkMRMLScalarVolumeNode
 from skimage import (exposure, filters, feature, morphology)
-from skimage import img_as_ubyte
+from skimage import img_as_ubyte, measure
 import cv2
 from skimage.measure import label, regionprops
 import qt
 from enhance_ctp import enhance_ctp
+from scipy import ndimage
+
+import nibabel as nib
+import synthstrip 
+import tempfile 
+
+
 #
 # SEEG_masking
 #
@@ -282,7 +289,7 @@ class SEEG_maskingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     def onSaveButton(self) -> None:
         """Handle 'Save Mask' button click event."""
         # Use current working directory or specify a default folder for the file dialog
-        defaultDirectory = os.getcwd()  # Current working directory
+        defaultDirectory = os.getcwd()  
         
         # Alternatively, use a predefined directory such as the user's home directory
         # defaultDirectory = os.path.expanduser("~")  # User's home directory
@@ -457,12 +464,33 @@ class SEEG_maskingLogic:
         inputArrayVtk = inputImage.GetPointData().GetScalars()
         inputArray = vtk.util.numpy_support.vtk_to_numpy(inputArrayVtk)
 
+        dims = inputImage.GetDimensions() # No funciona
+
+        smooth_input = filters.gaussian(inputArray, sigma=2)
+        
         # Apply binarization logic: all non-zero values become 1, zero stays as 0
-        maskArray = (inputArray != 0).astype(np.float32)  # All non-zero become 1
+        thresh = filters.threshold_otsu(smooth_input)
+        
+        maskArray = (smooth_input > thresh).astype(np.uint8)  # All non-zero become 1
+        maskArray = maskArray.reshape(dims)
+        print("Mask array dtype:", maskArray.dtype)
+        print("Unique values in mask array:", np.unique(maskArray))
+        selem_close = ndimage.generate_binary_structure(3, 1) # 3D structuring element
+        print("Input array shape:", inputArray.shape)
+        print("Mask array shape:", maskArray.shape)
+        print("Selem shape:", selem_close.shape)
+        closed = ndimage.binary_closing(maskArray, structure=selem_close, iterations=3).astype(np.uint8)
+        
+        filled = ndimage.binary_fill_holes(closed).astype(np.uint8)
+
+        selem_dilate = ndimage.generate_binary_structure(3, 1) # 3D structuring element
+        dilated = ndimage.binary_dilation(filled, structure=selem_dilate, iterations=4).astype(np.uint8)
+        
+        final_flat = dilated.ravel()
+  
 
         # Convert the mask (NumPy array) back to VTK format
-        outputArrayVtk = vtk.util.numpy_support.numpy_to_vtk(maskArray, deep=True)
-
+        outputArrayVtk = vtk.util.numpy_support.numpy_to_vtk(final_flat, deep=True, array_type = vtk.VTK_UNSIGNED_CHAR)
         # Create an output image and set its scalar data
         #outputImage.GetPointData().SetScalars(outputArrayVtk)
 
@@ -476,7 +504,7 @@ class SEEG_maskingLogic:
 
         # Ensure the output volume is properly displayed
         slicer.app.processEvents()  # Ensures the UI of Slicer is updated
-        slicer.app.layoutManager().resetSliceViews()  # Optionally: This resets the viewer's focus on the new volume
+
 
         if showResult:
             slicer.app.processEvents()  # Ensure the viewer updates with new data
@@ -486,6 +514,11 @@ class SEEG_maskingLogic:
 
         return maskVolumeNode
     
+    def 
+    
+
+    
+
 
     ### Finding points of contact (creating a mask and enhancing the image) (no funciona aun :c) en al archivo ctp_enhance.py sí
 
