@@ -464,8 +464,13 @@ def enhance_ctp(inputVolume, inputROI, methods, outputDir=None):
 # inputVolume = slicer.util.getNode('CTp.3D')  
 # inputROI = slicer.util.getNode('4_mask_test')  # Brain Mask 
 
+<<<<<<< HEAD
 # # Output directory
 # outputDir = r'C:\\Users\\rocia\\Downloads\\TFG\\Cohort\\Enhance_ctp_tests\\P4'  
+=======
+# Define the output directory
+outputDir = r'C:\\Users\\rocia\\Downloads\\TFG\\Cohort\\Enhance_ctp_tests'  
+>>>>>>> 3628b73a3e53668a56942159978836cb423db319
 
 # # Test the function 
 # enhancedVolumeNodes = enhance_ctp(inputVolume, inputROI, methods='all', outputDir=outputDir)
