@@ -27,10 +27,7 @@ import qt
 from enhance_ctp import enhance_ctp
 from scipy import ndimage
 
-import nibabel as nib
-import synthstrip 
-import tempfile 
-
+from create_brain_mask import brain_mask_modified
 
 #
 # SEEG_masking
@@ -48,7 +45,7 @@ class SEEG_masking(ScriptedLoadableModule):
         # TODO: set categories (folders where the module shows up in the module selector)
         self.parent.categories = [translate("qSlicerAbstractCoreModule", "Examples")]
         self.parent.dependencies = []  # TODO: add here list of module names that this module requires
-        self.parent.contributors = ["John Doe (AnyWare Corp.)"]  # TODO: replace with "Firstname Lastname (Organization)"
+        self.parent.contributors = ["Rocio Avalos (AnyWare Corp.)"]  # TODO: replace with "Firstname Lastname (Organization)"
         # TODO: update with short description of the module and a link to online module documentation
         # _() function marks text as translatable to other languages
         self.parent.helpText = _("""
@@ -66,7 +63,7 @@ and Steve Pieper, Isomics, Inc. and was partially funded by NIH grant 3P41RR0132
 
 
 #
-# Register sample data sets in Sample Data module
+# Register sample data sets in Sample Data module?
 #
 
 
@@ -184,8 +181,11 @@ class SEEG_maskingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
 
         # Buttons
         self.ui.applyButton.connect("clicked(bool)", self.onApplyButton)
-        self.ui.newButton.connect("clicked(bool)", self.onNewButton) # New Button
+        self.ui.newButton_save.connect("clicked(bool)", self.onNewButton_save) # New Button
+        self.ui.inputSelector_saveMaskAI.setMRMLScene(slicer.mrmlScene)
+        
         self.ui.saveButton.connect("clicked(bool)", self.onSaveButton) # Save Button
+        
         # Set up the Save button
         self.ui.saveButton.setText("Save Mask") # Save Button
 
@@ -281,18 +281,20 @@ class SEEG_maskingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
             # Optionally, update the UI to indicate the mask was created
             slicer.util.infoDisplay("Mask created! Now, select a location to save the mask.")
 
-    def onNewButton(self) -> None:
-        """Handle 'New' button click event"""
-        print("New Button Clicked")
+    # def onNewButton_save(self) -> None:
+    #     """Create mask and save it when user clicks the button"""
+    #     with slicer.util.tryWithErrorDisplay(_("Failed to compute results."), waitCursor = True):
+    #         self.outputVolumeNode = self.logic.brain_mask_modified(self.ui.inputSelector_saveMaskAI.currentNode())
+    #         print("Brain mask created and saved ")
 
     
     def onSaveButton(self) -> None:
         """Handle 'Save Mask' button click event."""
-        # Use current working directory or specify a default folder for the file dialog
+        # Use current working directory 
         defaultDirectory = os.getcwd()  
         
-        # Alternatively, use a predefined directory such as the user's home directory
-        # defaultDirectory = os.path.expanduser("~")  # User's home directory
+        # Alternatively, use a predefined directory 
+        # defaultDirectory = os.path.expanduser("~")  
         
         # Create a file dialog
         fileDialog = qt.QFileDialog()
@@ -310,7 +312,7 @@ class SEEG_maskingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
                 if success:
                     slicer.util.infoDisplay(f"Mask saved to:\n{savePath}")
                 else:
-                    slicer.util.errorDisplay("Failed to save mask")
+                    slicer.util.errorDisplay("❌ Failed to save mask")
             else:
                 slicer.util.errorDisplay("No mask to save")   
 
@@ -514,10 +516,16 @@ class SEEG_maskingLogic:
 
         return maskVolumeNode
     
-    def 
-    
+    # def brain_mask_modified(self, inputVolume: vtkMRMLScalarVolumeNode) -> vtkMRMLScalarVolumeNode:
+    #     """
+    #     Generate a binary brain mask using DeepBrain
+    #     param inputVolume: volume to be masked
+    #     param outputVolume: volume to be used as a mask
+    #     """
 
-    
+
+    #     return brain_mask_modified(self, inputVolume)
+
 
 
     ### Finding points of contact (creating a mask and enhancing the image) (no funciona aun :c) en al archivo ctp_enhance.py sí

@@ -48,27 +48,27 @@
         </property>
        </widget>
       </item>
+      <item row="1" column="0" colspan="2">
+       <widget class="QPushButton" name="applyButton">
+        <property name="enabled">
+         <bool>true</bool>
+        </property>
+        <property name="toolTip">
+         <string>Run the algorithm.</string>
+        </property>
+        <property name="text">
+         <string>✅ Apply Masking Norm (the electrodes are gonna be here)</string>
+        </property>
+       </widget>
+      </item>
+      <item row="2" column="0" colspan="2">
+       <widget class="QPushButton" name="saveButton">
+        <property name="text">
+         <string>Save mask</string>
+        </property>
+       </widget>
+      </item>
      </layout>
-    </widget>
-   </item>
-   <item row="1" column="0">
-    <widget class="QPushButton" name="applyButton">
-     <property name="enabled">
-      <bool>true</bool>
-     </property>
-     <property name="toolTip">
-      <string>Run the algorithm.</string>
-     </property>
-     <property name="text">
-      <string>✅ Apply Masking Norm (the electrodes are gonna be here)</string>
-     </property>
-    </widget>
-   </item>
-   <item row="2" column="0">
-    <widget class="QPushButton" name="saveButton">
-     <property name="text">
-      <string>Save mask</string>
-     </property>
     </widget>
    </item>
    <item row="3" column="0">
@@ -78,7 +78,10 @@
      </property>
      <layout class="QGridLayout" name="gridLayout_2">
       <item row="0" column="1">
-       <widget class="qMRMLNodeComboBox" name="MRMLNodeComboBox">
+       <widget class="qMRMLNodeComboBox" name="inputSelector_saveMaskAI">
+        <property name="enabled">
+         <bool>true</bool>
+        </property>
         <property name="nodeTypes">
          <stringlist notr="true"/>
         </property>
@@ -90,7 +93,7 @@
         </property>
        </widget>
       </item>
-      <item row="0" column="0">
+      <item row="0" column="0" alignment="Qt::AlignLeft">
        <widget class="QLabel" name="label_2">
         <property name="text">
          <string>Input Volume: </string>
@@ -98,9 +101,9 @@
        </widget>
       </item>
       <item row="1" column="0" colspan="2">
-       <widget class="QPushButton" name="newButton">
+       <widget class="QPushButton" name="newButton_save">
         <property name="text">
-         <string>Create Mask :D</string>
+         <string>Create Mask and save it :D</string>
         </property>
        </widget>
       </item>

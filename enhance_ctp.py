@@ -2,15 +2,16 @@ import slicer
 import numpy as np
 import vtk
 import cv2
-from skimage import exposure, filters
+from skimage import exposure, filters, morphology
 from skimage.exposure import rescale_intensity
 import pywt
 import pywt.data
 import os
 import matplotlib.pyplot as plt
 import SimpleITK as sitk
+from scipy import ndimage
 
-def enhance_ctp(inputVolume, inputROI, methods, outputDir=None):
+def enhance_ctp(inputVolume, inputROI = None, methods = 'all', outputDir=None):
     methods ='all'
     # Convert input volume to numpy array
     volume_array = slicer.util.arrayFromVolume(inputVolume)
@@ -22,16 +23,27 @@ def enhance_ctp(inputVolume, inputROI, methods, outputDir=None):
 
     # Convert ROI (binary mask) to numpy array
     roi_array = slicer.util.arrayFromVolume(inputROI)
+    
 
     # Ensure ROI is binary (mask), converting to 0s and 1s
     roi_array = np.uint8(roi_array > 0)
 
     print(f"Shape of input volume: {volume_array.shape}")  
     print(f"Shape of ROI mask: {roi_array.shape}")
+    
+    # Fill Inside the ROI
+    
+    print("🖌️ Filling inside the ROI...")
+    filled_roi = ndimage.binary_fill_holes(roi_array)
+
+    # 4. Apply Morphological Closing for Smoothing
+    print("⚙️ Applying morphological closing...")
+    struct_elem = morphology.ball(5)  # Structuring element for closing
+    closed_roi = morphology.binary_closing(filled_roi, struct_elem)
 
 
    # Check if the shapes match
-    if roi_array.shape != volume_array.shape:
+    if closed_roi.shape != volume_array.shape:
         print("ROI and input volume shapes do not match. Resampling ROI to match input volume (using SimpleITK)...")
 
         # Get the spacing, origin, and dimensions of the input volume
@@ -76,12 +88,12 @@ def enhance_ctp(inputVolume, inputROI, methods, outputDir=None):
 
         print(f"Resampled ROI shape: {resampled_roi_array.shape}")
 
-        roi_array = resampled_roi_array # Update roi_array
+        closed_roi = resampled_roi_array # Update roi_array
 
         # Ensure that the shapes match after resampling
-        if roi_array.shape != volume_array.shape:
+        if closed_roi.shape != volume_array.shape:
             print("Resampling failed. Shapes still do not match.")
-            print(f"Volume shape: {volume_array.shape}, Resampled ROI shape: {roi_array.shape}")
+            print(f"Volume shape: {volume_array.shape}, Resampled ROI shape: {closed_roi.shape}")
             return None
 
         print("ROI successfully resampled (using SimpleITK).")
@@ -94,7 +106,7 @@ def enhance_ctp(inputVolume, inputROI, methods, outputDir=None):
 
     # Extract the region of interest from the input volume using the binary mask
         
-    roi_volume = volume_array * roi_array
+    roi_volume = volume_array * closed_roi
 
 
     # Define enhancement methods
@@ -464,13 +476,8 @@ def enhance_ctp(inputVolume, inputROI, methods, outputDir=None):
 # inputVolume = slicer.util.getNode('CTp.3D')  
 # inputROI = slicer.util.getNode('4_mask_test')  # Brain Mask 
 
-<<<<<<< HEAD
 # # Output directory
 # outputDir = r'C:\\Users\\rocia\\Downloads\\TFG\\Cohort\\Enhance_ctp_tests\\P4'  
-=======
-# Define the output directory
-outputDir = r'C:\\Users\\rocia\\Downloads\\TFG\\Cohort\\Enhance_ctp_tests'  
->>>>>>> 3628b73a3e53668a56942159978836cb423db319
 
 # # Test the function 
 # enhancedVolumeNodes = enhance_ctp(inputVolume, inputROI, methods='all', outputDir=outputDir)
