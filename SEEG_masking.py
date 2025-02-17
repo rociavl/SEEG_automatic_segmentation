@@ -181,11 +181,10 @@ class SEEG_maskingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
 
         # Buttons
         self.ui.applyButton.connect("clicked(bool)", self.onApplyButton)
-        self.ui.newButton_save.connect("clicked(bool)", self.onNewButton_save) # New Button
-        self.ui.inputSelector_saveMaskAI.setMRMLScene(slicer.mrmlScene)
+        #self.ui.newButton_save.connect("clicked(bool)", self.onNewButton_save) # New Button
+        #self.ui.inputSelector_saveMaskAI.setMRMLScene(slicer.mrmlScene)
         
         self.ui.saveButton.connect("clicked(bool)", self.onSaveButton) # Save Button
-        
         # Set up the Save button
         self.ui.saveButton.setText("Save Mask") # Save Button
 
@@ -290,31 +289,36 @@ class SEEG_maskingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     
     def onSaveButton(self) -> None:
         """Handle 'Save Mask' button click event."""
-        # Use current working directory 
-        defaultDirectory = os.getcwd()  
-        
-        # Alternatively, use a predefined directory 
-        # defaultDirectory = os.path.expanduser("~")  
-        
+        print("✅ Save button clicked!")  # Debugging print
+
+        if not self.outputVolumeNode:
+            slicer.util.errorDisplay("❌ No mask to save! Apply first.")
+            print("❌ No mask to save!")
+            return
+
+        print(f"🛠️ Saving mask: {self.outputVolumeNode.GetName()}")  # Debugging print
+
         # Create a file dialog
         fileDialog = qt.QFileDialog()
         fileDialog.setAcceptMode(qt.QFileDialog.AcceptSave)
         fileDialog.setNameFilter("NRRD files (*.nrrd)")
-        fileDialog.setDefaultSuffix('nrrd')  # Set the default directory
+        fileDialog.setDefaultSuffix('nrrd')
         fileDialog.setOption(qt.QFileDialog.ShowDirsOnly, False)
 
         # Show file dialog and get selected folder
         if fileDialog.exec_():
-            savePath = fileDialog.selectedFiles()[0]  # Get the selected folder path
-            
-            if self.outputVolumeNode:
-                success = slicer.util.saveNode(self.outputVolumeNode, savePath)
-                if success:
-                    slicer.util.infoDisplay(f"Mask saved to:\n{savePath}")
-                else:
-                    slicer.util.errorDisplay("❌ Failed to save mask")
+            savePath = fileDialog.selectedFiles()[0]
+            print(f"📂 Selected save path: {savePath}")  # Debugging print
+
+            success = slicer.util.saveNode(self.outputVolumeNode, savePath)
+
+            if success:
+                slicer.util.infoDisplay(f"✅ Mask saved to:\n{savePath}")
+                print(f"✅ Mask saved successfully at: {savePath}")  # Debugging print
             else:
-                slicer.util.errorDisplay("No mask to save")   
+                slicer.util.errorDisplay("❌ Failed to save mask")
+                print("❌ Failed to save mask")  # Debugging print
+
 
     def saveMaskToFile(self, maskVolumeNode: slicer.vtkMRMLScalarVolumeNode, filePath: str) -> None:
         """Save the output volume (mask) to the given file path."""
@@ -339,26 +343,44 @@ class SEEG_maskingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     
     def onCTPButton(self) -> None:
         """Handle 'CTP' button click event."""
-        # Process the input and create the mask (but don't save it yet)
         
-        #self.outputVolumeNode = self.logic.enhance_ctp(self.ui.inputSelector_ctp.currentNode(), self.ui.inputSelector_ROI_norm.currentNode())
+        # Get selected nodes from the UI
         inputVolume = self.ui.inputSelector_ctp.currentNode()
         inputROI = self.ui.inputSelector_ROI_norm.currentNode()
+
+        # Optional: Get additional inputs for methods and outputDir
+        methods = 'all'  # Placeholder, will be replaced by actual UI input later
+        outputDir = r'C:\\Users\\rocia\\Downloads\\TFG\\Cohort\\Enhance_ctp_tests'  # Placeholder, will be replaced by actual UI input later
         
+        # Validate inputs
         if not inputVolume or not inputROI:
             slicer.util.errorDisplay("Please select both the input volume and the ROI.")
             return
-        
-        self.outputVolumeNode = self.logic.enhance_ctp(inputVolume, inputROI, methods, outputDir =None)
 
-        if self.outputVolumeNode:
-            slicer.app.applicationLogic().GetSelectionNode().SetReferenceActiveVolumeID(self.outputVolumeNode.GetID())
-            slicer.app.applicationLogic().PropagateVolumeSelection()
-            slicer.app.layoutManager().resetSliceViews()
-            slicer.app.processEvents()
+        # Call the logic function from the logic class
+        enhancedVolumeNodes = self.logic.enhance_ctp_logic(inputVolume, inputROI, methods, outputDir)
 
-        # Optionally, update the UI to indicate the mask was created
-        slicer.util.infoDisplay("Mask created! Now, select a location to save the mask. :D")
+        # Handle the returned enhancedVolumeNodes dictionary (which contains all enhanced volume nodes)
+        if enhancedVolumeNodes:
+            # Loop over all the enhanced volume nodes (stored in the dictionary)
+            for method_name, enhancedVolumeNode in enhancedVolumeNodes.items():
+                # Check if enhancedVolumeNode is a valid volume node
+                if enhancedVolumeNode:
+                    # Set the reference active volume for each enhanced volume node
+                    slicer.app.applicationLogic().GetSelectionNode().SetReferenceActiveVolumeID(enhancedVolumeNode.GetID())
+                    slicer.app.applicationLogic().PropagateVolumeSelection()
+                    slicer.app.layoutManager().resetSliceViews()
+                    slicer.app.processEvents()
+
+                    # Optionally, inform the user for each enhancement
+                    slicer.util.infoDisplay(f"Enhanced volume for method '{method_name}' has been created and set as active.")
+                
+        else:
+            slicer.util.errorDisplay("Error: No enhanced volume nodes were returned.")
+
+
+
+
 
 #
 # SEEG_maskingLogic
@@ -530,20 +552,32 @@ class SEEG_maskingLogic:
 
     ### Finding points of contact (creating a mask and enhancing the image) (no funciona aun :c) en al archivo ctp_enhance.py sí
 
-    def enhance_ctp(
-            inputVolume: vtkMRMLScalarVolumeNode,
-            inputROI: vtkMRMLScalarVolumeNode, # ROI (norm mask), do I have to change the name? 
-            methods='all', outputDir=None 
-    ) -> vtkMRMLScalarVolumeNode:
-        """
-        Enhancing the image using different methods
-        param inputVolume: volume to be enhanced
-        param inputROI: volume to be used as a mask
-        param methods: methods to be used for enhancing the image
-        
-        """
 
-        return enhance_ctp(inputVolume, inputROI, methods = 'all', outputDir = r'C:\\Users\\rocia\\Downloads\\TFG\\Cohort\\Enhance_ctp_tests') 
+    def enhance_ctp_logic(self, inputVolume, inputROI, methods='all', outputDir=None):
+        """
+        Logic function to handle the volume enhancement.
+        :param inputVolume: The input volume to enhance
+        :param inputROI: The input ROI mask for enhancement
+        :param methods: Methods used for enhancement (default 'all')
+        :param outputDir: Directory to save the output (optional)
+        :return: vtkMRMLScalarVolumeNode or None
+        """
+        # Call the enhance_ctp function from the external script
+        enhancedVolumeNode = enhance_ctp(inputVolume, inputROI, methods, outputDir)
+
+        # Handle the result (e.g., update the active volume, reset slice views)
+        if enhancedVolumeNode:
+            slicer.app.applicationLogic().GetSelectionNode().SetReferenceActiveVolumeID(enhancedVolumeNode.GetID())
+            slicer.app.applicationLogic().PropagateVolumeSelection()
+            slicer.app.layoutManager().resetSliceViews()
+            slicer.app.processEvents()
+
+            slicer.util.infoDisplay("Enhancement complete! Mask created!")
+        else:
+            slicer.util.errorDisplay("Enhancement failed. Please check your inputs and try again.")
+        
+        return enhancedVolumeNode
+        
         
 
 
