@@ -1,30 +1,34 @@
 import slicer
 import os
-import vtk
-import numpy as np
 import torch
 import monai
-from monai.transforms import Compose, ScaleIntensity, ToTensor, Resize, SpatialPad
-from monai.networks.nets import UNet
+import numpy as np
+import subprocess  # Add subprocess to run the training script
 
-def create_brain_mask_monai(inputVolume, outputDir=None):
+def create_brain_mask_monai(inputVolume=None, inputNrrd=None, outputDir=None, train_model=False, dataset=None):
     """
-    Generate a binary brain mask using a MONAI deep learning model. It doens't work yet!!
+    Generate a binary brain mask using a MONAI deep learning model, with optional training. It's in progress!!
     
     Args:
-        inputVolume (vtkMRMLScalarVolumeNode): The input MRI scan.
+        inputVolume (vtkMRMLScalarVolumeNode): The input MRI scan (optional).
         outputDir (str): Directory to save the brain mask (optional).
+        train_model (bool): Whether to train the model (optional, default is False).
+        dataset (str): Path to training dataset (if train_model is True).
     
     Returns:
         vtkMRMLScalarVolumeNode: The binary brain mask volume.
     """
-    if not inputVolume:
+    if not inputVolume and not inputNrrd:
         slicer.util.errorDisplay("No input volume selected")
         return None
     print("✅ Input validation passed.")
 
-    # Convert inputVolume to numpy array (MONAI works with numpy arrays)
-    input_array = slicer.util.arrayFromVolume(inputVolume)
+    # Load NRRD file if provided
+    if inputNrrd:
+        input_array = load_nrrd_image(inputNrrd)
+    else:
+        # Convert inputVolume to numpy array (MONAI works with numpy arrays)
+        input_array = slicer.util.arrayFromVolume(inputVolume)
 
     # Ensure input_array has the right dimensions (C, H, W, D)
     if input_array.ndim == 3:  # If the array is 3D (H, W, D), add a channel dimension
@@ -43,34 +47,19 @@ def create_brain_mask_monai(inputVolume, outputDir=None):
     # Convert the numpy array to a PyTorch tensor
     input_tensor = torch.tensor(input_array)
 
-    # Check the tensor shape before applying any transformations
-    print("Input tensor shape before padding:", input_tensor.shape)
-
-    # Extract the spatial size (height, width, depth) for padding (ignore the batch and channel dimensions)
+    # Define the target size to ensure dimensions are a multiple of 16 (or any multiple required by U-Net)
     spatial_size = input_tensor.shape[2:]  # (H, W, D)
-    print(f"Extracted spatial_size: {spatial_size}")
-
-    # Ensure the spatial size is a multiple of 16 (or another multiple based on U-Net requirements)
-    target_size = [
-    ((s + 15) // 16) * 16 for s in spatial_size]
-    print(f"Computed target_size for padding: {target_size}")
-
-    # Add debugging information to check the dimensions
-    print("Tensor shape with batch and channel: ", input_tensor.shape)
+    target_size = [((s + 15) // 16) * 16 for s in spatial_size]
 
     # Apply spatial padding (only for spatial dimensions, not batch/channel)
-    pad_transform = SpatialPad(spatial_size=target_size)  # SpatialPad expects 3D size
+    pad_transform = SpatialPad(spatial_size=target_size)  
     padded_input_tensor = pad_transform(input_tensor[0])
 
-    # Check the tensor shape after padding
-    print("Padded tensor shape:", padded_input_tensor.shape)
-
-    padded_input_tensor = padded_input_tensor.unsqueeze(0)
-    print("Padded tensor unsqueeze shape:", padded_input_tensor.shape)
+    padded_input_tensor = padded_input_tensor.unsqueeze(0)  # Add batch dimension
 
     # Define a MONAI UNet model
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    model = UNet(
+    model = monai.networks.nets.UNet(
         spatial_dims=3,
         in_channels=1,
         out_channels=1,
@@ -78,7 +67,17 @@ def create_brain_mask_monai(inputVolume, outputDir=None):
         strides=[2, 2, 2],
     ).to(device)
 
-    # Run inference
+    # If training is required, we call the training script
+    if train_model:
+        if not dataset:
+            slicer.util.errorDisplay("No dataset provided for training")
+            return None
+        print("Training model with provided dataset...")
+        
+        # Call the training script (train_model_mask.py)
+        subprocess.call(["python", "train_model_mask.py", dataset])
+    
+    # Run inference (or trained model if train_model is True)
     model.eval()  # Set the model to evaluation mode
     with torch.no_grad():
         padded_input_tensor = padded_input_tensor.to(device)
@@ -92,41 +91,39 @@ def create_brain_mask_monai(inputVolume, outputDir=None):
 
     # Create a new Slicer volume node for the binary mask
     outputVolumeNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLScalarVolumeNode")
-    outputVolumeNode.SetName(f"BrainMask_{inputVolume.GetName()}")
+    outputVolumeNode.SetName(f"BrainMask_{inputVolume.GetName() if inputVolume else os.path.basename(inputNrrd)}")
 
     # Update volume array
     slicer.util.updateVolumeFromArray(outputVolumeNode, output_array)
 
     # Copy spatial properties (origin, spacing, direction)
-    outputVolumeNode.SetOrigin(inputVolume.GetOrigin())
-    outputVolumeNode.SetSpacing(inputVolume.GetSpacing())
+    if inputVolume:
+        outputVolumeNode.SetOrigin(inputVolume.GetOrigin())
+        outputVolumeNode.SetSpacing(inputVolume.GetSpacing())
 
-    # Copy the transformation matrix using VTK
-    matrix = vtk.vtkMatrix4x4()
-    inputVolume.GetIJKToRASMatrix(matrix)
-    outputVolumeNode.SetIJKToRASMatrix(matrix)
+        # Copy the transformation matrix using VTK
+        matrix = vtk.vtkMatrix4x4()
+        inputVolume.GetIJKToRASMatrix(matrix)
+        outputVolumeNode.SetIJKToRASMatrix(matrix)
 
-    # Retain transformations
-    outputVolumeNode.SetAndObserveTransformNodeID(inputVolume.GetTransformNodeID())
+        # Retain transformations
+        outputVolumeNode.SetAndObserveTransformNodeID(inputVolume.GetTransformNodeID())
 
-    # Copy Display Properties
-    inputDisplayNode = inputVolume.GetDisplayNode()
-    if inputDisplayNode:
-        outputDisplayNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLScalarVolumeDisplayNode")
-        outputDisplayNode.Copy(inputDisplayNode)
-        outputVolumeNode.SetAndObserveDisplayNodeID(outputDisplayNode.GetID())
+        # Copy Display Properties
+        inputDisplayNode = inputVolume.GetDisplayNode()
+        if inputDisplayNode:
+            outputDisplayNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLScalarVolumeDisplayNode")
+            outputDisplayNode.Copy(inputDisplayNode)
+            outputVolumeNode.SetAndObserveDisplayNodeID(outputDisplayNode.GetID())
 
     # Save Output Brain Mask (NRRD format)
     if outputDir:
-        outputPath = os.path.join(outputDir, f"brain_mask_{inputVolume.GetName()}.nrrd")
+        outputPath = os.path.join(outputDir, f"brain_mask_{inputVolume.GetName() if inputVolume else os.path.basename(inputNrrd)}.nrrd")
         slicer.util.saveNode(outputVolumeNode, outputPath)
         print(f"💾 Brain mask saved to: {outputPath}")
 
     print("✅ Brain mask created successfully using MONAI.")
     return outputVolumeNode
-
-
-
 
 # Exampl
 inputVolumeNode = slicer.util.getNode("3Dps.3D")  

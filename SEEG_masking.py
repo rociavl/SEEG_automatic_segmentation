@@ -27,7 +27,7 @@ import qt
 from enhance_ctp import enhance_ctp
 from scipy import ndimage
 
-from create_brain_mask import brain_mask_modified
+from create_brain_mask_monai import create_brain_mask_monai
 
 #
 # SEEG_masking
