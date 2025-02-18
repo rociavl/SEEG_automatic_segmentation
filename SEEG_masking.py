@@ -25,6 +25,7 @@ import cv2
 from skimage.measure import label, regionprops
 import qt
 from enhance_ctp import enhance_ctp
+from enhance_ctp import add_more_filter
 from scipy import ndimage
 
 from create_brain_mask_monai import create_brain_mask_monai
@@ -194,6 +195,10 @@ class SEEG_maskingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         self.ui.inputSelector_ctp.setMRMLScene(slicer.mrmlScene)
         self.ui.inputSelector_ROI_norm.setMRMLScene(slicer.mrmlScene)
 
+        self.ui.pushButton_filters.connect('clicked(bool)', self.onApplyFiltersButton)
+        self.ui.inputSelector_filter.setMRMLScene(slicer.mrmlScene)
+
+
         # Make sure parameter node is initialized (needed for module reload)
         self.initializeParameterNode()
 
@@ -286,6 +291,7 @@ class SEEG_maskingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     #         self.outputVolumeNode = self.logic.brain_mask_modified(self.ui.inputSelector_saveMaskAI.currentNode())
     #         print("Brain mask created and saved ")
 
+
     
     def onSaveButton(self) -> None:
         """Handle 'Save Mask' button click event."""
@@ -350,12 +356,13 @@ class SEEG_maskingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
 
         # Optional: Get additional inputs for methods and outputDir
         methods = 'all'  # Placeholder, will be replaced by actual UI input later
-        outputDir = r'C:\\Users\\rocia\\Downloads\\TFG\\Cohort\\Enhance_ctp_tests'  # Placeholder, will be replaced by actual UI input later
+        outputDir = r'C:\\Users\\rocia\\Downloads\\TFG\\Cohort\\Enhance_ctp_tests'  
         
         # Validate inputs
         if not inputVolume or not inputROI:
             slicer.util.errorDisplay("Please select both the input volume and the ROI.")
             return
+        
 
         # Call the logic function from the logic class
         enhancedVolumeNodes = self.logic.enhance_ctp_logic(inputVolume, inputROI, methods, outputDir)
@@ -379,9 +386,81 @@ class SEEG_maskingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
             slicer.util.errorDisplay("Error: No enhanced volume nodes were returned.")
 
 
+    def onApplyFiltersButton(self) -> None:
+        """Handle 'Apply Filters' button click event with debugging statements."""
+        
+        print("[DEBUG] onApplyFiltersButton triggered")
+
+        # Get the current selected volume from the UI (assuming you have a selector for the volume)
+        inputVolume = self.ui.inputSelector_filter.currentNode()  # Assuming you have a volume selector in your UI
+        
+        if not inputVolume:
+            slicer.util.errorDisplay("Please select a valid volume to apply filters.")
+            print("[ERROR] No input volume selected.")
+            return
+
+        print(f"[DEBUG] Selected input volume: {inputVolume.GetName()}")
+        print(f"[DEBUG] Checkable_filters initialized: {self.ui.Checkable_filters}")
+
+        # Collect the selected filters from the UI
+        try:
+             # Get the checked indexes from the ctkCheckableComboBox
+            checked_indexes = self.ui.Checkable_filters.checkedIndexes()
+            print(f"[DEBUG] Checked filter indexes: {checked_indexes}")
+            selected_items = [index.data() for index in checked_indexes]  # Get selected filters
+            print(f"[DEBUG] Selected filter UI items: {selected_items}")
+        except AttributeError as e:
+            print(f"[ERROR] Could not retrieve selected filters: {e}")
+            slicer.util.errorDisplay("Error retrieving selected filters. Check if Checkable_filters is properly initialized.")
+            return
 
 
+        # Define a mapping of combo box display names to internal filter names
+        filter_names = {
+            "Morphological Operations": "morph_operations",
+            "Canny Edge Detection": "canny_edge",
+            "High Pass Sharpening": "high_pass_sharpening"
+        }
 
+        # Map selected items to internal names
+        selected_filters = [filter_names[item] for item in selected_items if item in filter_names]
+        
+        if not selected_filters:
+            print("[WARNING] No valid filters selected.")
+            slicer.util.infoDisplay("No additional filters selected. The volume will remain unchanged.")
+            return
+
+        print(f"[DEBUG] Mapped selected filters: {selected_filters}")
+
+        # Define the output directory
+        outputDir = r'C:\\Users\\rocia\\Downloads\\TFG\\Cohort\\Enhance_ctp_tests'
+        print(f"[DEBUG] Output directory: {outputDir}")
+
+        # Apply filters by calling the add_more_filter function
+        try:
+            enhancedVolumeNode = add_more_filter(inputVolume, selected_filters, outputDir)
+        except Exception as e:
+            print(f"[ERROR] Failed to apply filters: {e}")
+            slicer.util.errorDisplay(f"Error while applying filters: {e}")
+            return
+
+        if enhancedVolumeNode:
+            try:
+                slicer.app.applicationLogic().GetSelectionNode().SetReferenceActiveVolumeID(enhancedVolumeNode.GetID())
+                slicer.app.applicationLogic().PropagateVolumeSelection()
+                slicer.app.layoutManager().resetSliceViews()
+                slicer.app.processEvents()
+                print("[DEBUG] Enhanced volume set as active.")
+
+                # Inform the user that the filters have been applied and saved
+                slicer.util.infoDisplay("Filters applied successfully to the selected volume.")
+                slicer.util.infoDisplay(f"Filtered volume saved as: {outputDir}\\Enhanced_more_filters_{inputVolume.GetName()}.nrrd")
+            except Exception as e:
+                print(f"[ERROR] Failed to update UI with enhanced volume: {e}")
+                slicer.util.errorDisplay(f"Error updating UI with enhanced volume: {e}")
+        else:
+            print("[ERROR] add_more_filter did not return a valid volume node.")
+            slicer.util.errorDisplay("Error: No enhanced volume was created.")
 #
 # SEEG_maskingLogic
 #
@@ -577,6 +656,34 @@ class SEEG_maskingLogic:
             slicer.util.errorDisplay("Enhancement failed. Please check your inputs and try again.")
         
         return enhancedVolumeNode
+    
+    def apply_filters_logic(self, enhancedVolume, selected_filters):
+        """
+        Logic function to handle applying additional filters to the enhanced volume.
+        :param enhancedVolume: The enhanced volume after running `enhance_ctp`
+        :param selected_filters: List of filters to apply (e.g., "morph_operations", "canny_edge")
+        :return: vtkMRMLScalarVolumeNode or None
+        """
+        # Call the add_more_filter function from the external script
+        enhancedVolumeNode = add_more_filter(enhancedVolume, selected_filters)
+
+        # Handle the result (e.g., update the active volume, reset slice views)
+        if enhancedVolumeNode:
+            slicer.app.applicationLogic().GetSelectionNode().SetReferenceActiveVolumeID(enhancedVolumeNode.GetID())
+            slicer.app.applicationLogic().PropagateVolumeSelection()
+            slicer.app.layoutManager().resetSliceViews()
+            slicer.app.processEvents()
+
+            slicer.util.infoDisplay("Additional filters applied successfully!")
+        else:
+            slicer.util.errorDisplay("Applying filters failed. Please check your inputs and try again.")
+        
+        return enhancedVolumeNode
+
+    
+
+    
+
         
         
 
