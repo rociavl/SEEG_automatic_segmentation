@@ -755,3 +755,6 @@ class SEEG_maskingTest(ScriptedLoadableModuleTest):
         self.assertEqual(outputScalarRange[1], inputScalarRange[1])
 
         self.delayDisplay("Test passed")
+
+
+    
