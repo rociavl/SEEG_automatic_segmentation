@@ -1,121 +1,107 @@
 import numpy as np
 import slicer
 import SimpleITK as sitk
-from scipy.ndimage import gaussian_filter, median_filter
-from skimage.restoration import denoise_tv_chambolle, denoise_nl_means, estimate_sigma
-import pywt
+import cupy as cp  # GPU acceleration
+from scipy.ndimage import gaussian_filter
+import cv2  # Fast OpenCV processing
+from skimage.morphology import skeletonize_3d
 import os
 import vtk
+from joblib import Parallel, delayed
+import multiprocessing.shared_memory as shm
 
-from skimage import measure
-from scipy.ndimage import binary_erosion
+# ----------- FAST GPU FILTERS ----------- Is too slow!!
 
-def enhance_ctp_3D(inputVolume, methods=['gaussian'], outputDir=None):
-    """
-    Apply multiple 3D filtering techniques to enhance CT volumes in Slicer.
+def apply_gaussian_gpu(volume, sigma=1.5):
+    """Uses GPU-based Gaussian filtering with CuPy."""
+    volume_gpu = cp.asarray(volume)  # Move to GPU
+    result_gpu = cp.array(gaussian_filter(volume_gpu, sigma=sigma))
+    return cp.asnumpy(result_gpu)  # Move back to CPU
 
-    Parameters:
-    - inputVolume (vtkMRMLScalarVolumeNode): The input CT scan.
-    - methods (list): List of filtering methods to apply in sequence.
-    - outputDir (str, optional): Directory to save the enhanced volume.
+def apply_fast_bilateral_gpu(volume, d=5, sigmaColor=50, sigmaSpace=50):
+    """Fast bilateral filter using OpenCV (optimized for large data)."""
+    return np.array([cv2.bilateralFilter(slice.astype(np.float32), d, sigmaColor, sigmaSpace) for slice in volume])
 
-    Returns:
-    - enhancedVolumeNodes (dict): Dictionary of filtered volumes with method names as keys.
-    """
-    # Convert input volume to numpy array
-    volume_array = slicer.util.arrayFromVolume(inputVolume)
+def apply_skeleton_gpu(volume):
+    """Skeletonization with optimized GPU processing."""
+    volume_gpu = cp.asarray(volume)
+    skeleton_gpu = cp.array(skeletonize_3d(volume_gpu))
+    return cp.asnumpy(skeleton_gpu)
 
-    # Ensure volume is valid
+# ----------- OPTIMIZED ENHANCEMENT FUNCTION -----------
+
+def enhance_ctp_3D(inputVolume, methods=['gaussian_gpu'], outputDir=None):
+    """Apply ultra-fast 3D filtering with GPU and parallel processing."""
+    
+    # Load CT scan as numpy array
+    volume_array = slicer.util.arrayFromVolume(inputVolume).astype(np.float16)  # Convert to float16 (faster!)
+
     if volume_array is None or volume_array.size == 0:
-        print("❌ Error: Input volume is empty or invalid.")
+        print("❌ Error: Empty volume.")
         return None
 
-    print(f"📏 Input volume shape: {volume_array.shape}")
-
-    # Start with the original volume
-    processed_array = volume_array.copy()
+    print(f"📏 Input shape: {volume_array.shape}")
     enhancedVolumeNodes = {}
 
-    for method in methods:
+    # Use multiprocessing shared memory to avoid slow memory copies
+    shared_memory = shm.SharedMemory(create=True, size=volume_array.nbytes)
+    shared_array = np.ndarray(volume_array.shape, dtype=volume_array.dtype, buffer=shared_memory.buf)
+    np.copyto(shared_array, volume_array)  # Copy data into shared memory
+
+    # Run filters in parallel
+    def process_method(method):
         print(f"🔍 Applying {method}...")
 
-        if method == 'gaussian':
-            processed_array = gaussian_filter(processed_array, sigma=1.5)
+        filtered_array = shared_array.copy()  # Work on a shared copy
 
-        elif method == 'median':
-            processed_array = median_filter(processed_array, size=3)
+        if method == 'gaussian_gpu':
+            filtered_array = apply_gaussian_gpu(filtered_array)
+        elif method == 'fast_bilateral_gpu':
+            filtered_array = apply_fast_bilateral_gpu(filtered_array)
+        elif method == 'skeleton_gpu':
+            filtered_array = apply_skeleton_gpu(filtered_array)
 
-        elif method == 'anisotropic':
-            processed_array = denoise_tv_chambolle(processed_array, weight=0.1, multichannel=False)
+        # Convert back to uint8 (if necessary)
+        filtered_array = np.clip(filtered_array, 0, 255).astype(np.uint8)
 
-        elif method == 'nl_means':
-            sigma_est = np.mean(estimate_sigma(processed_array))
-            processed_array = denoise_nl_means(processed_array, h=1.15 * sigma_est, fast_mode=True)
-
-        elif method == 'wavelet':
-            coeffs = pywt.wavedecn(processed_array, wavelet='coif3', level=3)
-            
-            # Process all but the first element (which is an array, not a dict)
-            coeffs_thresh = [coeffs[0]]  # Keep the approximation coefficients
-            coeffs_thresh += [{key: pywt.threshold(value, 0.02 * np.max(value), mode='soft') 
-                            for key, value in level.items()} for level in coeffs[1:]]
-            
-            processed_array = pywt.waverecn(coeffs_thresh, wavelet='coif3')
-        
-        # Apply morphological closing to merge dots
-        if method == 'gaussian' or method == 'median':  # Example condition to apply morphological operations after smoothing
-            processed_array = morphology.binary_closing(processed_array, morphology.ball(3))  # Increase size for larger effect
-
-        # Connected component analysis (for removing small structures)
-        labeled_array, num_features = measure.label(processed_array, connectivity=3)
-        sizes = np.bincount(labeled_array.ravel())
-        min_size = 500  # Filter small components (adjust this size as needed)
-        processed_array = np.isin(labeled_array, np.where(sizes >= min_size)[0])
-
-        # Create a new volume node to store the intermediate enhanced image
+        # Create & update Slicer volume node
         enhancedVolumeNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLScalarVolumeNode")
         enhancedVolumeNode.SetName(f"Filtered_3D_{method}_{inputVolume.GetName()}")
+        slicer.util.updateVolumeFromArray(enhancedVolumeNode, filtered_array)
+        enhancedVolumeNode.Copy(inputVolume)  # Copy metadata
 
-        # Copy transformation information
-        enhancedVolumeNode.SetOrigin(inputVolume.GetOrigin())
-        enhancedVolumeNode.SetSpacing(inputVolume.GetSpacing())
+        # Save if needed
+        if outputDir:
+            os.makedirs(outputDir, exist_ok=True)
+            output_file = os.path.join(outputDir, f"Filtered_3D_{method}_{inputVolume.GetName()}.nrrd")
+            slicer.util.saveNode(enhancedVolumeNode, output_file)
+            print(f"✅ Saved {method}: {output_file}")
 
-        # Get and set the IJK to RAS transformation matrix
-        ijkToRasMatrix = vtk.vtkMatrix4x4()
-        inputVolume.GetIJKToRASMatrix(ijkToRasMatrix)
-        enhancedVolumeNode.SetIJKToRASMatrix(ijkToRasMatrix)
+        return method, enhancedVolumeNode
 
-        # Update the volume node with the enhanced image data
-        slicer.util.updateVolumeFromArray(enhancedVolumeNode, processed_array)
+    # Use parallel processing (all CPU cores + GPU)
+    results = Parallel(n_jobs=-1, backend="loky")(delayed(process_method)(method) for method in methods)
 
-        # Store the node in the results dictionary
-        enhancedVolumeNodes[method] = enhancedVolumeNode
+    # Free shared memory
+    shared_memory.close()
+    shared_memory.unlink()
 
-        # Set output directory
-        if outputDir is None:
-            outputDir = slicer.app.temporaryPath()
-        
-        if not os.path.exists(outputDir):
-            os.makedirs(outputDir)
-
-        # Save the volume as NRRD
-        output_file = os.path.join(outputDir, f"Filtered_3D_{method}_{inputVolume.GetName()}.nrrd")
-        slicer.util.saveNode(enhancedVolumeNode, output_file)
-        print(f"✅ Saved {method} enhancement as: {output_file}")
+    # Collect results
+    for method, node in results:
+        enhancedVolumeNodes[method] = node
 
     return enhancedVolumeNodes
 
 
-
 # Load the input volume and ROI
-inputVolume = slicer.util.getNode('Filtered_gamma_3_ctp.3D')  
+inputVolume = slicer.util.getNode('Enhanced_Laplacian_sharpen_2_ctp.3D')  
 
 
 # # Output directory
 outputDir = r'C:\\Users\\rocia\\Downloads\\TFG\\Cohort\\Enhance_ctp_tests\\P1\\Enhance_ctp_3D'  
 
 # # Test the function 
-enhancedVolumeNodes = enhance_ctp_3D(inputVolume,  methods=['gaussian', 'wavelet', 'nl_means'], outputDir=outputDir)
+enhancedVolumeNodes = enhance_ctp_3D(inputVolume,  methods=['nl_means'], outputDir=outputDir)
 
 # # Access the enhanced volume nodes
 for method, volume_node in enhancedVolumeNodes.items():

@@ -28,7 +28,7 @@ from enhance_ctp import enhance_ctp
 from enhance_ctp import add_more_filter
 from scipy import ndimage
 
-from create_brain_mask_monai import create_brain_mask_monai
+
 
 #
 # SEEG_masking
