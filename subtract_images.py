@@ -80,7 +80,7 @@ def save_and_visualize(thresholded_node, output_path="contacts_highlighted.nrrd"
     """
     Save the thresholded result as an .nrrd file and visualize the first slice.
     """
-    # Save the thresholded result in NRRD format
+    
     slicer.util.saveNode(thresholded_node, output_path)
     print(f"Thresholded result saved to: {output_path}")
 
