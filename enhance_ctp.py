@@ -15,6 +15,35 @@ import sklearn
 from sklearn.cluster import DBSCAN
 from sklearn.mixture import GaussianMixture
 from skimage.morphology import remove_small_objects
+import scipy.ndimage as ndi
+from skimage.segmentation import watershed
+from skimage import segmentation, measure, feature, draw
+from skimage.filters import sobel
+from scipy.ndimage import distance_transform_edt, label
+from scipy.ndimage import watershed_ift
+from skimage.feature import peak_local_max
+from skimage.segmentation import active_contour
+from skimage.draw import ellipse
+from skimage import img_as_float
+from skimage.filters import gaussian
+from skimage.feature import canny
+from skimage.transform import rescale
+from skimage.filters import gaussian, laplace
+from skimage.feature import canny, peak_local_max
+from skimage.transform import rescale
+from skimage.feature import peak_local_max
+from skimage.measure import regionprops
+from skimage.morphology import remove_small_objects
+import pandas as pd
+from skimage.measure import regionprops
+
+import logging
+from skimage.feature import peak_local_max
+logging.basicConfig(level=logging.DEBUG)
+
+###################################
+### Image processing filters ###
+##################################
 
 # Define enhancement methods
 def apply_clahe(roi_volume):
@@ -350,59 +379,36 @@ def sobel_edge_detection(roi_volume):
     return sobel_slices
 
 ###
-## 
+## masks and 
 ###
 
-def remove_large_objects(binary_image, min_size=500):
-    # Use connected components to label objects and remove large ones
-    num_labels, labels = cv2.connectedComponents(binary_image.astype(np.uint8))
+def remove_large_objects(segmented_image, size_threshold):
+    """
+    Removes large objects from a labeled image.
 
-    # Create an empty image to store the result
-    cleaned_image = np.zeros_like(binary_image)
+    Parameters:
+        segmented_image (numpy.ndarray): 3D image with labeled connected components (after watershed).
+        size_threshold (int): Minimum size (in number of voxels) for an object to be kept.
 
-    for label in range(1, num_labels):  # Skip the background label (0)
-        # Find the size of the object (number of pixels)
-        object_size = np.sum(labels == label)
-
-        if object_size < min_size:
-            # If the object is smaller than the minimum size, keep it
-            cleaned_image[labels == label] = 255
-
-    return cleaned_image
-
-def generate_contour_mask(brain_mask, dilation_iterations=1):
-    # Dilate the brain mask slightly to get the contour region
-    dilated_mask = cv2.dilate(brain_mask.astype(np.uint8), np.ones((3, 3), np.uint8), iterations=dilation_iterations)
+    Returns:
+        numpy.ndarray: Modified image with large objects removed.
+    """
+    # Label the connected components (returns labeled image and number of features)
+    labeled_image = measure.label(segmented_image, connectivity=1)  # Only keep the labeled image
     
-    # Subtract the original brain mask from the dilated mask to get the contour region
-    contour_mask = dilated_mask - brain_mask.astype(np.uint8)
+    # Create a mask to keep small objects
+    mask = np.zeros_like(segmented_image, dtype=bool)
     
-    return contour_mask
+    # Iterate through each labeled component and check its size
+    for region in measure.regionprops(labeled_image):
+        # If the region is small enough, keep it
+        if region.area <= size_threshold:
+            mask[labeled_image == region.label] = True
 
-def remove_brain_contour_from_image(binary_image, contour_mask):
-    # Set pixels in the contour region to 0
-    binary_image[contour_mask == 255] = 0
-    return binary_image
-
-def get_watershed_markers(binary, brain_mask=None, contour_mask=None):
-    # If inputRoi is provided (brain_mask), remove the brain contour before applying watershed
-    if brain_mask is not None and contour_mask is not None:
-        cleaned_binary = remove_brain_contour_from_image(binary, contour_mask)
-    else:
-        cleaned_binary = binary
-
-    # Convert to uint8 (0 and 255)
-    cleaned_binary = np.uint8(cleaned_binary > 0) * 255
-
-    # Use connected components to label the markers (ensure input is binary)
-    num_labels, markers = cv2.connectedComponents(cleaned_binary.astype(np.uint8))
-
-    # Label markers for watershed using connected components
-    markers += 1  # Ensure background is not zero
-    markers[cleaned_binary == 0] = 0  # Mark unknown region as zero (exclude contour areas)
-
-    return markers
-
+    # Apply the mask to the original image to remove large objects
+    filtered_image = segmented_image * mask
+    
+    return filtered_image
 
 
 def vtk_to_numpy(vtk_image_node):
@@ -422,56 +428,139 @@ def update_vtk_volume_from_numpy(np_array, vtk_image_node):
     # Ensure that the volume is properly updated in the scene
     slicer.app.processEvents()
 
-# Define the watershed function to be applied on a slice
-def apply_watershed_on_volume(volume_array, brain_mask=None):
-    markers = np.zeros_like(volume_array, dtype=np.int32)  # Initialize marker array
+def generate_contour_mask(brain_mask, dilation_iterations=1):
+    """
+    Generates a contour mask by dilating the brain mask and subtracting the original.
+    
+    Parameters:
+      - brain_mask: Binary mask of the brain (NumPy array). If not, it will be converted.
+      - dilation_iterations: Number of dilation iterations.
+    
+    Returns:
+      - contour_mask: The computed contour mask.
+    """
+    # Convert brain_mask to a NumPy array if it isn't already
+    if not isinstance(brain_mask, np.ndarray):
+        brain_mask = slicer.util.arrayFromVolume(brain_mask)
+    
+    # Ensure brain_mask is binary (0 and 255)
+    brain_mask = np.uint8(brain_mask > 0) * 255
+    
+    # Create structuring element
+    kernel = np.ones((3, 3), np.uint8)
+    # Dilate the brain mask
+    dilated_mask = cv2.dilate(brain_mask, kernel, iterations=dilation_iterations)
+    # Subtract the original mask from the dilated mask to obtain the contour
+    contour_mask = cv2.subtract(dilated_mask, brain_mask)
+    
+    return contour_mask
+
+def remove_brain_contour_from_image(binary_image: np.ndarray, brain_mask) -> np.ndarray:
+    """
+    Removes the brain contour from the binary image using a provided brain mask.
+
+    Parameters:
+        binary_image (np.ndarray): The binary image to be processed.
+        brain_mask (np.ndarray or vtkMRMLScalarVolumeNode): The brain mask.
+
+    Returns:
+        np.ndarray: The binary image with the brain contour removed.
+    """
+    if brain_mask is None:
+        return binary_image
+
+    # Convert brain_mask to a NumPy array if it is not already one.
+    if not isinstance(brain_mask, np.ndarray):
+        brain_mask = slicer.util.arrayFromVolume(brain_mask)
+
+    # Check that shapes match.
+    if binary_image.shape != brain_mask.shape:
+        raise ValueError("Binary image and brain mask dimensions do not match.")
+
+    # Generate the contour mask from the brain mask.
+    contour_mask = generate_contour_mask(brain_mask)
+    # Remove the contour pixels from the binary image.
+    binary_image[contour_mask > 0] = 0
+
+    return binary_image
+
+def get_watershed_markers(binary):
+    #print("Generating watershed markers using scipy...")
+
+    # Convert binary to uint8 (0 and 255)
+    binary = np.uint8(binary > 0) * 255
+    #print(f"Marker generation - Binary shape: {binary.shape}, Dtype: {binary.dtype}")
+    
+    # Compute distance transform
+    distance = distance_transform_edt(binary)
+    #print(f"Distance transform - Shape: {distance.shape}, Dtype: {distance.dtype}")
+    
+    # Check distance map stats
+    # print("Distance transform min:", distance.min())
+    # print("Distance transform max:", distance.max())
+    # print("Distance transform mean:", distance.mean())
+    
+    # Use a fixed threshold based on the distance map or other methods
+    otsu_threshold = filters.threshold_otsu(distance)
+    markers = measure.label(distance > otsu_threshold)  # Apply threshold
+    #print(f"Markers generated - Shape: {markers.shape}, Dtype: {markers.dtype}")
+    
+    return markers
+
+#  Apply watershed on the entire 3D volume
+def apply_watershed_on_volume(volume_array):
+    print(f"apply_watershed_on_volume - Input volume shape: {volume_array.shape}")
+    
+    # Initialize the watershed segmented result
     watershed_segmented = np.zeros_like(volume_array, dtype=np.uint8)  # For final segmentation
 
-    print(f"apply_watershed_on_volume - Input volume shape: {volume_array.shape}")
-
     for i in range(volume_array.shape[0]):  # Iterate over slices
+        #print(f"Processing Slice {i}...")
+
+        # Convert to binary slice
         binary_slice = np.uint8(volume_array[i] > 0) * 255  # Convert to binary
-        
-        print(f"Slice {i} - Shape: {binary_slice.shape}, Dtype: {binary_slice.dtype}")
+        #print(f"Slice {i} - Shape: {binary_slice.shape}, Dtype: {binary_slice.dtype}")
 
-        # If brain_mask is provided, use it directly (it's already a NumPy array)
-        if brain_mask is not None:
-            brain_mask_slice = brain_mask[i]  # Get the corresponding slice
-            binary_slice = cv2.bitwise_and(binary_slice, brain_mask_slice)
+        # Generate markers for the watershed algorithm
+        marker_slice = get_watershed_markers(binary_slice)
+        #print(f"Slice {i} - Marker shape: {marker_slice.shape}, Dtype: {marker_slice.dtype}")
 
-        marker_slice = get_watershed_markers(binary_slice)  # Get markers
+        # Apply watershed algorithm to the slice
+        #print(f"Applying watershed on Slice {i}...")
+        segmented_slice = segmentation.watershed(-binary_slice, marker_slice)  # Use negative binary for watershed
 
-        print(f"Slice {i} - Markers Shape: {marker_slice.shape}, Dtype: {marker_slice.dtype}")
+        #print(f"Slice {i} - Segmented shape: {segmented_slice.shape}, Dtype: {segmented_slice.dtype}")
+       # print(f"Slice {i} - Unique Values: {np.unique(segmented_slice)}")
 
-        slice_bgr = cv2.cvtColor(binary_slice, cv2.COLOR_GRAY2BGR)
+        # Store the result of this slice in the final segmented volume
+        watershed_segmented[i] = segmented_slice
 
-        # Apply watershed
-        cv2.watershed(slice_bgr, marker_slice)
-
-        segmented = np.uint8(marker_slice > 1) * 255  # Ignore background/unknown regions
-
-        markers[i] = marker_slice
-        watershed_segmented[i] = segmented
-        
-        print(f"Slice {i} - Segmented Shape: {segmented.shape}, Dtype: {segmented.dtype}")
-
+    print(f"Watershed segmentation - Final result shape: {watershed_segmented.shape}, Dtype: {watershed_segmented.dtype}")
     return watershed_segmented
 
 
+# Function to apply DBSCAN clustering on 2D slices
 def apply_dbscan_2d(volume_array, eps=5, min_samples=10):
+    print(f"apply_dbscan_2d - Input volume shape: {volume_array.shape}")
+    
     clustered_volume = np.zeros_like(volume_array, dtype=np.int32)  # Store cluster labels
     cluster_counts = {}
 
     for slice_idx in range(volume_array.shape[0]):
+        print(f"Processing Slice {slice_idx} for DBSCAN...")
+        
         slice_data = volume_array[slice_idx]
 
         # Extract nonzero points
         yx_coords = np.column_stack(np.where(slice_data > 0))
+        print(f"Slice {slice_idx} - Non-zero points: {len(yx_coords)}")
 
         if len(yx_coords) == 0:
+            print(f"Slice {slice_idx} - No non-zero points, skipping...")
             continue  # Skip empty slices
 
         # Apply DBSCAN
+        print(f"Applying DBSCAN on Slice {slice_idx}...")
         dbscan = DBSCAN(eps=eps, min_samples=min_samples)
         labels = dbscan.fit_predict(yx_coords)
 
@@ -484,7 +573,9 @@ def apply_dbscan_2d(volume_array, eps=5, min_samples=10):
         clustered_volume[slice_idx] = clustered_slice
         cluster_counts[slice_idx] = len(set(labels)) - (1 if -1 in labels else 0)  # Exclude noise
 
+    print(f"DBSCAN - Cluster counts per slice: {cluster_counts}")
     return clustered_volume, cluster_counts
+
 
 
 def apply_gmm(image, n_components=3):
@@ -522,23 +613,106 @@ def apply_gmm(image, n_components=3):
         return np.zeros_like(image)  # Return blank mask on failure
 
     return gmm_image
+def apply_snakes_tiny(volume):
+    """
+    Apply active contour model (snakes) to each slice of a 3D volume.
 
-def clean_segmentation(segmented_image, min_size=50):
-    return np.uint8(remove_small_objects(segmented_image.astype(bool), min_size=min_size) * 255)
-
-def separate_merged_electrodes(segmented_image, min_distance=5):
-    # Perform distance transform to help separate close objects
-    dist_transform = cv2.distanceTransform(segmented_image, cv2.DIST_L2, 5)
-
-    # Threshold the distance transform to create a separation mask
-    _, separation_mask = cv2.threshold(dist_transform, min_distance, 255, cv2.THRESH_BINARY)
-
-    # Apply morphological opening to further separate electrodes if they are still too close
-    kernel = np.ones((3, 3), np.uint8)
-    separated = cv2.morphologyEx(separation_mask, cv2.MORPH_OPEN, kernel)
+    Parameters:
+        volume (numpy.ndarray): 3D binary image (with electrodes or structures).
     
-    return separated
+    Returns:
+        numpy.ndarray: 3D image with applied contours on each slice.
+    """
+    # Initialize an empty volume for the final result
+    final_contours = np.zeros_like(volume, dtype=np.uint8)
 
+    # Iterate over each slice in the 3D volume
+    for i in range(volume.shape[0]):  # Iterate through each slice
+        slice_2d = volume[i]  # Extract 2D slice
+        
+        # Apply the canny edge detection (to detect edges)
+        edges = feature.canny(slice_2d)  # Works with 2D array
+        
+        # Define an initial contour (e.g., an ellipse in the center of the image)
+        s = np.zeros(slice_2d.shape)
+        center = (slice_2d.shape[0] // 2, slice_2d.shape[1] // 2)
+        
+        # Use skimage.draw.ellipse to draw an ellipse in the center
+        rr, cc = draw.ellipse(center[0], center[1], 20, 20)
+        s[rr, cc] = 1  # Create an initial contour
+        
+        # Apply active contour (snakes)
+        snake = active_contour(edges, s, alpha=0.015, beta=10, gamma=0.001, max_num_iter=250)
+
+        # Convert the snake result back to a binary contour
+        contour_mask = np.zeros_like(slice_2d)
+        contour_mask[tuple(snake.T.astype(int))] = 1  # Set the contour points to 1
+
+        # Store the result back into the final_contours volume
+        final_contours[i] = contour_mask
+    
+    return final_contours
+
+
+def get_auto_seeds(binary):
+    """
+    Automatically generate seeds based on the distance transform.
+    Avoids erosion and ensures small electrodes are detected.
+    """
+    # Compute distance transform
+    distance = distance_transform_edt(binary)
+
+    # Detect local maxima (potential seeds)
+    local_max = peak_local_max(distance, indices=False, min_distance=1, labels=binary)
+
+    # Label detected seeds
+    seeds, num_seeds = label(local_max)
+
+    print(f"Generated {num_seeds} automatic seeds.")
+    return seeds
+
+def refine_labels(labels, min_size=5):
+    """
+    Removes falsely merged labels by filtering based on region properties.
+    """
+    refined = np.zeros_like(labels)
+    for region in regionprops(labels):
+        if region.area >= min_size:  # Keep only objects above threshold
+            refined[labels == region.label] = region.label
+    return refined
+
+def region_growing(binary, tolerance=3, min_size=5):
+    """
+    Adaptive region growing for tiny structures like electrodes.
+
+    Parameters:
+        binary (numpy.ndarray): Binary input image.
+        tolerance (int): Controls how much the region can grow.
+        min_size (int): Minimum size of detected objects.
+
+    Returns:
+        numpy.ndarray: Segmented and labeled mask.
+    """
+    # Generate automatic seed points
+    seeds = get_auto_seeds(binary)
+    
+    # Initialize output segmentation
+    segmented = np.zeros_like(binary, dtype=np.uint8)
+    
+    # Perform growth from each seed
+    for label_id in range(1, seeds.max() + 1):
+        mask = seeds == label_id
+        region = binary.copy()
+
+        # Region growing: Expand mask based on tolerance
+        region_grown = (distance_transform_edt(mask) < tolerance) & binary
+
+        segmented[region_grown] = label_id  # Assign label
+
+    # Remove merged artifacts
+    segmented = refine_labels(segmented, min_size)
+
+    return segmented
 ###    
 # Function to enhance the CTP.3D images 
 ###
@@ -661,7 +835,7 @@ def enhance_ctp(inputVolume, inputROI=None, methods = 'all', outputDir=None):
     # Apply selected enhancement methods
     enhanced_volumes = {}
     if methods == 'all':
-        enhanced_volumes['gamma_correction'] = gamma_correction(roi_volume, gamma = 10)
+        enhanced_volumes['gamma_correction'] = gamma_correction(roi_volume, gamma = 5)
         
         # Noise reduction
         enhanced_volumes['bilateral_filter'] = bilateral_filter(enhanced_volumes['gamma_correction'], sigma_color= 50, sigma_space=50)
@@ -669,80 +843,77 @@ def enhance_ctp(inputVolume, inputROI=None, methods = 'all', outputDir=None):
         enhanced_volumes['wavelet'] = wavelet_denoise(enhanced_volumes['sherpened'])
         
         enhanced_volumes['clahe'] = apply_clahe(enhanced_volumes['sherpened'])
-        enhanced_volumes['laplacian'] = laplacian_sharpen(enhanced_volumes['clahe'])
+        enhanced_volumes['gamma_2'] = gamma_correction(enhanced_volumes['clahe'], gamma = 2)
+        enhanced_volumes['high_pass'] = sharpen_high_pass(enhanced_volumes['gamma_2'])
         ## Morphological operations
-        enhanced_volumes['closing'] = morph_operations(enhanced_volumes['laplacian'], operation= 'close')
+
+        enhanced_volumes['closing'] = morph_operations(enhanced_volumes['gamma_2'], operation= 'close')
         
         # Edge boosting?
-        enhanced_volumes['high_pass'] = sharpen_high_pass(enhanced_volumes['closing'])
+        enhanced_volumes['high_pass_2'] = sharpen_high_pass(enhanced_volumes['closing'])
         
         # Enhance contrast 
-        enhanced_volumes['gamma_2'] = gamma_correction(enhanced_volumes['high_pass'], gamma = 1.8)
+        enhanced_volumes['gamma_3'] = gamma_correction(enhanced_volumes['high_pass_2'], gamma = 1.8)
         # Create an elliptical structuring element (adjust size if needed)
-        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7))
+        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (10, 10))
 
         # Apply white top-hat transformation
         tophat = cv2.morphologyEx(enhanced_volumes['gamma_2'], cv2.MORPH_TOPHAT, kernel)
         enhanced_volumes['tophat'] = cv2.addWeighted(enhanced_volumes['gamma_2'], 1, tophat, 2, 0)
 
 
-    ## Watershed
-    print('Applying watershed...')
+    ## Main Segmenting Code ##
+    print('Applying watershed with skimage...')
 
-    # Convert the 'tophat' enhanced volume to a binary mask
-    binary = np.uint8(enhanced_volumes['tophat'] > 0) * 255
-
+    # Convert the 'tophat' enhanced volume to a binary mask (make sure it's NumPy array)
+    tophat_volume = enhanced_volumes['tophat']
+    binary = np.uint8(tophat_volume > 0) * 255
+    enhanced_volumes['binary_final'] = binary
     print(f"Binary image shape: {binary.shape}, Dtype: {binary.dtype}")
+    print(f"Binary Unique Values: {np.unique(binary)}")
+    
 
-    # Ensure inputROI is a valid vtkMRMLScalarVolumeNode before converting
-    if inputROI is not None and isinstance(inputROI, slicer.vtkMRMLScalarVolumeNode):
-        print("Using brain mask for watershed.")
-        
-        # Convert vtkMRMLScalarVolumeNode to NumPy array
-        brain_mask_array = slicer.util.arrayFromVolume(inputROI)
-        
-        if brain_mask_array is None:
-            raise ValueError("Failed to convert inputROI to NumPy array.")
-
-        print(f"Brain mask shape: {brain_mask_array.shape}, Dtype: {brain_mask_array.dtype}")
-        
-        watershed_segmented = apply_watershed_on_volume(binary, brain_mask=brain_mask_array)
-    else:
-        print("No valid brain mask provided.")
-        watershed_segmented = apply_watershed_on_volume(binary)
+    # Apply watershed directly on the 3D binary volume
+    watershed_segmented = apply_watershed_on_volume(binary)
 
     print(f"Watershed result shape: {watershed_segmented.shape}, Dtype: {watershed_segmented.dtype}")
+    print(f"Watershed result Unique Values: {np.unique(watershed_segmented)}")
 
-    # Ensure watershed_segmented is a NumPy array before updating the volume node
+    # Ensure the result is a NumPy array before updating the volume node
     if not isinstance(watershed_segmented, np.ndarray):
         raise TypeError("Expected a NumPy array for updateVolumeFromArray, but got a different type.")
 
-    # Create or update the Slicer volume node with the segmented result
-    segmented_volume_node = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLScalarVolumeNode")
+    # # Create a new scalar volume node in Slicer to store the result
+    # segmented_volume_node = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLScalarVolumeNode")
+    # segmented_volume_node.SetName('Watershed_Segmentation')
 
-    # Ensure updateVolumeFromArray gets a NumPy array, not a vtkMRMLScalarVolumeNode
-    slicer.util.updateVolumeFromArray(segmented_volume_node, watershed_segmented)
+    # # Ensure updateVolumeFromArray gets a NumPy array, not a vtkMRMLScalarVolumeNode
+    # slicer.util.updateVolumeFromArray(segmented_volume_node, watershed_segmented)
 
     # Store the final segmentation in enhanced_volumes
-    enhanced_volumes['watershed'] = segmented_volume_node
+    enhanced_volumes['watershed'] = watershed_segmented
 
 
+    size_threshold = 2500
+    cleaned_segmented_image = remove_large_objects(watershed_segmented, size_threshold)
 
-    # # **Apply DBSCAN Clustering on 2D Slices**
+    enhanced_volumes['watershed_small'] = cleaned_segmented_image
+
+    print('Apply Snakes for active contour')
+    snake_contour = apply_snakes_tiny(binary)
+    enhanced_volumes['snakes'] = snake_contour
+
+
+    # Apply DBSCAN clustering on the segmented volume
     print("🧩 Applying DBSCAN clustering to 2D slices...")
-    clustered_volume, cluster_counts = apply_dbscan_2d(watershed_segmented, eps=7, min_samples=10)
+    clustered_volume, cluster_counts = apply_dbscan_2d(binary, eps=3, min_samples=15)
     print(f"Cluster counts per slice: {cluster_counts}")
 
+    # Store the clustered results in enhanced_volumes
     enhanced_volumes['dbscan_clusters'] = clustered_volume
-   
-    #     # Apply GMM on DBSCAN-clustered regions
-    print("🧩 Applying GMM for refined segmentation...")
-    gmm_segmented = apply_gmm(clustered_volume, n_components=5)
 
-    #     # Clean the final segmentation using small object removal
-    cleaned_segmentation = clean_segmentation(gmm_segmented, min_size=500) 
-    enhanced_volumes['final_segmentation'] = cleaned_segmentation
-    
+    print("✔ DBSCAN clustering applied and stored in enhanced_volumes['dbscan_clusters'].")
+
     # Set output directory (maybe the user doesn't have write access to the default output directory)
     if outputDir is None:
         outputDir = slicer.app.temporaryPath()  
@@ -777,13 +948,6 @@ def enhance_ctp(inputVolume, inputROI=None, methods = 'all', outputDir=None):
         slicer.util.saveNode(enhancedVolumeNode, output_file)
         print(f"Saved {method_name} enhancement as: {output_file}")
     
-#  # Save and return the final DBSCAN + GMM segmented volume
-    final_volume_node = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLScalarVolumeNode")
-    final_volume_node.SetName(f"DBSCAN_GMM_Segmented_{inputVolume.GetName()}")
-    slicer.util.updateVolumeFromArray(final_volume_node, cleaned_segmentation)
-    slicer.util.saveNode(final_volume_node, os.path.join(outputDir, "final_segmented_volume.nrrd"))
-    print(f"Saved the final segmented volume as: {os.path.join(outputDir, 'final_segmented_volume.nrrd')}")
-
     return enhancedVolumeNodes
 
 ###
@@ -840,23 +1004,104 @@ def add_more_filter(inputVolume, selected_filters=None, outputDir=None):
     # Return the enhanced volume node
     return enhancedVolumeNode
       
+def label_and_get_centroids(mask):
+    """
+    Label each connected component in a binary mask and calculate the centroids.
+
+    Parameters:
+        mask (numpy.ndarray): A binary image where connected regions represent different objects.
+
+    Returns:
+        pandas.DataFrame: A DataFrame with the region labels, coordinates, and centroids.
+    """
+    # Label connected components in the mask
+    labeled_mask = measure.label(mask)
+    
+    # Get the properties of labeled regions
+    regions = regionprops(labeled_mask)
+    
+    # Prepare lists to store the information
+    region_data = []
+
+    for region in regions:
+        label = region.label
+        centroid = region.centroid
+        coords = region.coords  # List of coordinates for the region
+
+        # Store data in a dictionary format
+        for coord in coords:
+            region_data.append({
+                'Label': label,
+                'X': coord[0],  # Row index (Y in image terms)
+                'Y': coord[1],  # Column index (X in image terms)
+                'Z': coord[2] if len(coord) > 2 else None,  # Z-coordinate (for 3D images)
+                'Centroid_X': centroid[0],
+                'Centroid_Y': centroid[1],
+                'Centroid_Z': centroid[2] if len(centroid) > 2 else None
+            })
+    
+    # Create a DataFrame to store the data
+    df = pd.DataFrame(region_data)
+    
+    return df
+
+def save_centroids_to_csv(mask, file_path, inputVolume, enhancedVolumeNode):
+    """
+    Label regions in the mask, compute centroids, and save the data to a CSV file.
+    Also, copies the spatial transformation information (origin, spacing, and IJK to RAS matrix).
+
+    Parameters:
+        mask (numpy.ndarray): Binary mask image.
+        file_path (str): Path where to save the CSV file.
+        inputVolume (vtk.vtkImageData): The input volume node from which to copy the transformation.
+        enhancedVolumeNode (vtk.vtkMRMLVolumeNode): The enhanced volume node to which the transformation will be set.
+    """
+    # Get the labeled regions and their centroids
+    df = label_and_get_centroids(mask)
+    
+    # Copy the original volume's transformation information to the enhanced volume
+    enhancedVolumeNode.SetOrigin(inputVolume.GetOrigin())
+    enhancedVolumeNode.SetSpacing(inputVolume.GetSpacing())
+
+    # Get and set the IJK to RAS transformation matrix
+    ijkToRasMatrix = vtk.vtkMatrix4x4()
+    inputVolume.GetIJKToRASMatrix(ijkToRasMatrix)
+    enhancedVolumeNode.SetIJKToRASMatrix(ijkToRasMatrix)
+    
+    # Save the DataFrame to a CSV file
+    df.to_csv(file_path, index=False)
+    print(f"Data saved to {file_path}")
+
 
 # # Load the input volume and ROI
-# inputVolume = slicer.util.getNode('CTp.3D')  
-# inputROI = slicer.util.getNode('P5_brain_mask')  # Brain Mask 
+inputVolume = slicer.util.getNode('ctp.3D')  
+inputROI = slicer.util.getNode('P1_brain_mask')  # Brain Mask 
+# Define the file path to save the CSV
+file_path = r'C:\\Users\\rocia\\Downloads\\TFG\\Cohort\\Enhance_ctp_tests\\P1\\P1_centroids_and_coordinates.csv'
+
+enhancedVolumeNode = slicer.util.getNode('Enhanced_gamma_3_ctp.3D')
+
+volume_array = slicer.util.arrayFromVolume(enhancedVolumeNode)
+
+mask_label = np.uint8(volume_array > 0) * 255
+
+# Save the centroids and coordinates to CSV
+save_centroids_to_csv(mask_label, file_path, inputVolume, enhancedVolumeNode)
+
+
 
 # # # # Output directory
-# outputDir = r'C:\\Users\\rocia\\Downloads\\TFG\\Cohort\\Enhance_ctp_tests\\P5'  
+outputDir = r'C:\\Users\\rocia\\Downloads\\TFG\\Cohort\\Enhance_ctp_tests\\P1'  
 
 # # # # Test the function 
-# enhancedVolumeNodes = enhance_ctp(inputVolume, inputROI, methods='all', outputDir=outputDir)
+enhancedVolumeNodes = enhance_ctp(inputVolume, inputROI, methods='all', outputDir=outputDir)
 
 # # # # Access the enhanced volume nodes
-# for method, volume_node in enhancedVolumeNodes.items():
-#       if volume_node is not None:
-#           print(f"Enhanced volume for method '{method}': {volume_node.GetName()}")
-#       else:
-#           print(f"Enhanced volume for method '{method}': No volume node available.")
+for method, volume_node in enhancedVolumeNodes.items():
+       if volume_node is not None:
+           print(f"Enhanced volume for method '{method}': {volume_node.GetName()}")
+       else:
+           print(f"Enhanced volume for method '{method}': No volume node available.")
 
 
 #exec(open('C:/Users/rocia/AppData/Local/slicer.org/Slicer 5.6.2/SEEG_module/SEEG_masking/enhance_ctp.py').read())
