@@ -378,9 +378,9 @@ def sobel_edge_detection(roi_volume):
 
     return sobel_slices
 
-###
-## masks and 
-###
+###############################
+## masks and improvements ######
+#################################
 
 def remove_large_objects(segmented_image, size_threshold):
     """
@@ -713,9 +713,10 @@ def region_growing(binary, tolerance=3, min_size=5):
     segmented = refine_labels(segmented, min_size)
 
     return segmented
-###    
-# Function to enhance the CTP.3D images 
-###
+
+###########################################    
+# Function to enhance the CTP.3D images ###
+###############################################
 
 def enhance_ctp(inputVolume, inputROI=None, methods = 'all', outputDir=None):
     methods ='all'
@@ -950,9 +951,9 @@ def enhance_ctp(inputVolume, inputROI=None, methods = 'all', outputDir=None):
     
     return enhancedVolumeNodes
 
-###
-## Adding more filters in case it's necessary
-###
+#################################################
+## Adding more filters in case it's necessary ###
+################################################
 
 def add_more_filter(inputVolume, selected_filters=None, outputDir=None):
     # Default selected_filters to an empty list if None is provided
@@ -1004,6 +1005,9 @@ def add_more_filter(inputVolume, selected_filters=None, outputDir=None):
     # Return the enhanced volume node
     return enhancedVolumeNode
       
+####################
+
+
 def label_and_get_centroids(mask):
     """
     Label each connected component in a binary mask and calculate the centroids.

@@ -1,238 +1,248 @@
 import numpy as np
 import slicer
-import SimpleITK as sitk
-import cupy as cp  # GPU acceleration
-from scipy.ndimage import gaussian_filter
-import cv2  # Fast OpenCV processing
-from skimage.morphology import skeletonize_3d
-import os
 import vtk
-from joblib import Parallel, delayed
-import multiprocessing.shared_memory as shm
-from skimage.measure import label, regionprops
+from vtk.util import numpy_support
+import scipy.ndimage as ndi 
+import SimpleITK as sitk
+from scipy.ndimage import gaussian_filter, median_filter, laplace, sobel
+import logging
+from skimage.filters import frangi
+from pathlib import Path
+from concurrent.futures import ThreadPoolExecutor
+from skimage.measure import regionprops
 
-# ----------- FAST GPU FILTERS ----------- Is too slow!!
-def apply_gaussian_gpu(volume, sigma=1.5):
-    """Uses GPU-based Gaussian filtering with CuPy."""
-    volume_gpu = cp.asarray(volume)  # Move to GPU
-    result_gpu = cp.array(gaussian_filter(volume_gpu, sigma=sigma))
-    return cp.asnumpy(result_gpu)  # Move back to CPU
+# Set up logging
+logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 
-def apply_fast_bilateral_gpu(volume, d=5, sigmaColor=50, sigmaSpace=50):
-    """Fast bilateral filter using OpenCV (optimized for large data)."""
-    return np.array([cv2.bilateralFilter(slice.astype(np.float32), d, sigmaColor, sigmaSpace) for slice in volume])
-
-def apply_skeleton_gpu(volume):
-    """Skeletonization with optimized GPU processing."""
-    volume_gpu = cp.asarray(volume)
-    skeleton_gpu = cp.array(skeletonize_3d(volume_gpu))
-    return cp.asnumpy(skeleton_gpu)
-
-# ----------- OPTIMIZED ENHANCEMENT FUNCTION -----------
-
-def enhance_ctp_3D(inputVolume, methods=['gaussian_gpu'], outputDir=None):
-    """Apply ultra-fast 3D filtering with GPU and parallel processing."""
+def remove_large_objects(volume, size_threshold):
+    """
+    Removes objects that are larger than a given size threshold.
     
-    # Load CT scan as numpy array
-    volume_array = slicer.util.arrayFromVolume(inputVolume).astype(np.float16)  # Convert to float16 (faster!)
+    Parameters:
+        volume (numpy.ndarray): The 3D image (volume).
+        size_threshold (int): The size threshold for removing large objects.
+        
+    Returns:
+        numpy.ndarray: The volume with large objects removed.
+    """
+    try:
+        # Label connected components
+        labeled_volume, num_features = ndi.label(volume > 0)  # Only keep foreground
+        
+        # Get the properties of the labeled regions
+        regions = regionprops(labeled_volume)
+        
+        # Create an empty volume to hold the filtered results
+        filtered_volume = np.zeros_like(volume)
+        
+        # Loop through the regions and keep only those below the size threshold
+        for region in regions:
+            if region.area <= size_threshold:
+                for coord in region.coords:
+                    filtered_volume[tuple(coord)] = volume[tuple(coord)]  # Keep small objects
+        
+        print(f"✅ Removed {num_features - len([r for r in regions if r.area <= size_threshold])} large objects")
+        return filtered_volume
 
-    if volume_array is None or volume_array.size == 0:
-        print("❌ Error: Empty volume.")
+    except Exception as e:
+        logging.error(f"❌ Error removing large objects: {str(e)}")
+        return volume 
+
+
+# Vesselness Filter without SimpleITK Hessian (Custom Implementation)
+def vesselness_filter(image, sigma=1.0, alpha=0.5, beta=0.5):
+    """Applies custom vesselness filter for enhancing vessels."""
+    print(f"Applying vesselness filter with sigma={sigma}, alpha={alpha}, beta={beta}")
+    try:
+        # Compute Hessian manually
+        hessian_image = np.array([gaussian_filter(image, sigma=sigma, order=(2, 0, 0)), 
+                                  gaussian_filter(image, sigma=sigma, order=(0, 2, 0)), 
+                                  gaussian_filter(image, sigma=sigma, order=(0, 0, 2))])
+        
+        # Apply vesselness calculation (custom implementation)
+        norm_hessian = np.linalg.norm(hessian_image, axis=0)
+        vesselness = (1 - np.exp(-norm_hessian**2 / (2 * alpha**2))) * (1 - np.exp(-norm_hessian**2 / (2 * beta**2)))
+        return vesselness
+
+    except Exception as e:
+        logging.error(f"Error applying vesselness filter: {str(e)}")
         return None
 
-    print(f"📏 Input shape: {volume_array.shape}")
-    enhancedVolumeNodes = {}
-
-    # Use multiprocessing shared memory to avoid slow memory copies
-    shared_memory = shm.SharedMemory(create=True, size=volume_array.nbytes)
-    shared_array = np.ndarray(volume_array.shape, dtype=volume_array.dtype, buffer=shared_memory.buf)
-    np.copyto(shared_array, volume_array)  # Copy data into shared memory
-
-    # Run filters in parallel
-    def process_method(method):
-        print(f"🔍 Applying {method}...")
-
-        filtered_array = shared_array.copy()  # Work on a shared copy
-
-        if method == 'gaussian_gpu':
-            filtered_array = apply_gaussian_gpu(filtered_array)
-        elif method == 'fast_bilateral_gpu':
-            filtered_array = apply_fast_bilateral_gpu(filtered_array)
-        elif method == 'skeleton_gpu':
-            filtered_array = apply_skeleton_gpu(filtered_array)
-
-        # Convert back to uint8 (if necessary)
-        filtered_array = np.clip(filtered_array, 0, 255).astype(np.uint8)
-
-        # Create & update Slicer volume node
-        enhancedVolumeNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLScalarVolumeNode")
-        enhancedVolumeNode.SetName(f"Filtered_3D_{method}_{inputVolume.GetName()}")
-        slicer.util.updateVolumeFromArray(enhancedVolumeNode, filtered_array)
-        enhancedVolumeNode.Copy(inputVolume)  # Copy metadata
-
-        # Save if needed
-        if outputDir:
-            os.makedirs(outputDir, exist_ok=True)
-            output_file = os.path.join(outputDir, f"Filtered_3D_{method}_{inputVolume.GetName()}.nrrd")
-            slicer.util.saveNode(enhancedVolumeNode, output_file)
-            print(f"✅ Saved {method}: {output_file}")
-
-        return method, enhancedVolumeNode
-
-    # Use parallel processing (all CPU cores + GPU)
-    results = Parallel(n_jobs=-1, backend="loky")(delayed(process_method)(method) for method in methods)
-
-    # Free shared memory
-    shared_memory.close()
-    shared_memory.unlink()
-
-    # Collect results
-    for method, node in results:
-        enhancedVolumeNodes[method] = node
-
-    return enhancedVolumeNodes
+def log_filter_3d(image, sigma=1.0):
+    # Apply Gaussian filter first
+    smoothed = gaussian_filter(image, sigma=sigma)
+    # Apply Laplacian to detect edges
+    log_filtered = laplace(smoothed)
+    return log_filtered 
 
 
-def generate_3D_model(volume_node, threshold_value=None, min_size=50):
-    """
-    Generates a 3D surface model from a volume using thresholding & filtering.
+def sobel_filter(image):
+    """Applies Sobel edge detection filter."""
+    print("Applying Sobel edge detection filter")
+    try:
+        edges = np.sqrt(sobel(image, axis=0)**2 + sobel(image, axis=1)**2 + sobel(image, axis=2)**2)
+        return edges
+    except Exception as e:
+        logging.error(f"Error applying Sobel filter: {str(e)}")
+        return None
 
-    Parameters:
-    - volume_node: The input 3D volume node
-    - threshold_value: Intensity threshold for surface extraction
-    - min_size: Minimum size for objects to keep (remove noise)
+def gamma_correction(image, gamma=1.0):
+    """Applies Gamma correction to the image."""
+    print(f"Applying Gamma correction with gamma={gamma}")
+    try:
+        image = np.power(image, gamma)
+        return image
+    except Exception as e:
+        logging.error(f"Error applying gamma correction: {str(e)}")
+        return None
 
-    Returns:
-    - modelNode: The generated 3D model node
-    """
-    print("🔍 Generating 3D model...")
 
-    # Get volume array from Slicer
-    volume_array = slicer.util.arrayFromVolume(volume_node)
+# Apply 3D filter method
+def apply_3d_filter(volume, method, params=None):
+    """Applies various 3D filters using CPU-based methods."""
+    if params is None:
+        params = {}
 
-    # Set a dynamic threshold if not provided
-    if threshold_value is None:
-        threshold_value = np.percentile(volume_array, 99)  # Set threshold to 99th percentile
+    try:
+        print(f"Applying {method} filter with params: {params}")
 
-    # Create segmentation node
-    segmentationNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLSegmentationNode")
-    slicer.modules.segmentations.logic().ImportLabelmapToSegmentationNode(volume_node, segmentationNode)
+        # Apply filters using SciPy or SimpleITK
+        if method == 'gaussian':
+            sigma = params.get('sigma', 1.5)
+            result = gaussian_filter(volume, sigma=sigma)
+        elif method == 'median':
+            size = params.get('size', 1)
+            result = median_filter(volume, size=size)
+        elif method == 'laplacian':
+            result = laplace(volume)
+        elif method == 'frangi':
+            result = frangi(volume, scale_range=params.get('scale_range', (1, 10)), scale_step=params.get('scale_step', 2))
+        elif method == 'vesselness':
+            result = vesselness_filter(volume, sigma=params.get('sigma', 1.0), alpha=params.get('alpha', 0.5), beta=params.get('beta', 0.5))
+        elif method == 'sobel':
+            result = sobel_filter(volume)
+        elif method == 'gamma_correction':
+            result = gamma_correction(volume, gamma=params.get('gamma', 1.0))
+        else:
+            logging.error(f"Unknown filter method: {method}")
+            return None
 
-    # Apply threshold to filter out noise
-    slicer.modules.segmentations.logic().ThresholdSegmentationNode(segmentationNode, threshold_value, 1e9)
+        # Normalize output
+        result = (result - result.min()) / (result.max() - result.min())
+        print(f"{method} filter applied and normalized successfully")
+        return result
 
-    # Remove small components
-    segmentationArray = slicer.util.arrayFromVolume(volume_node)
-    labeled, num_features = label(segmentationArray, return_num=True)
-    sizes = np.bincount(labeled.ravel())
+    except Exception as e:
+        logging.error(f"Error applying {method} filter: {str(e)}")
+        return None
+
+
+# Process volume with cascading filters 
+def process_volume_3d(input_volume, methods=None, output_dir=None):
+    """Processes volume with multiple 3D enhancement methods sequentially, cascading the filters."""
+    if methods is None:
+        methods = [
+            ('gamma_correction', {'gamma': 5}),
+            ('laplacian', {}),
+            ('gaussian', {'sigma': 3}),
+            ('vesselness', {'sigma': 1.0, 'alpha': 0.5, 'beta': 0.5}),
+            ('frangi', {}),
+            ('sobel', {}),
+            ('gamma_correction', {'gamma': 1.5}),
+        ]
     
-    # Keep only objects larger than min_size
-    filtered_array = np.isin(labeled, np.where(sizes >= min_size)[0])
-    
-    # Convert back to slicer volume
-    slicer.util.updateVolumeFromArray(volume_node, filtered_array.astype(np.uint8))
+    # Load and normalize input volume
+    try:
+        print("Loading input volume and normalizing")
+        volume_array = slicer.util.arrayFromVolume(input_volume)
+        print(f"Volume array shape: {volume_array.shape}")
+        print(f"Initial volume range: {volume_array.min()} to {volume_array.max()}")
+        
+        if volume_array.min() == volume_array.max():
+            print("❌ The input volume has no variation in intensity!")
+            return None
+        
+        volume_array = volume_array.astype(np.float32)
+        volume_array = (volume_array - volume_array.min()) / (volume_array.max() - volume_array.min())
+        print(f"Normalized volume range: {volume_array.min()} to {volume_array.max()}")
+        
+    except Exception as e:
+        logging.error(f"Error loading and normalizing input volume: {str(e)}")
+        return None
 
-    # Extract 3D model
-    slicer.modules.segmentations.logic().ExportAllSegmentsToModels(segmentationNode)
+    enhanced_nodes = {}
 
-    return segmentationNode
+    # Apply filters in a cascade
+    for method, params in methods:
+        print(f"Processing method: {method}")
+        
+        # Apply filter to the current volume (cascading)
+        volume_array = apply_3d_filter(volume_array, method, params)
+        
+        if volume_array is None:
+            logging.warning(f"Skipping method {method} due to filter error")
+            continue
 
+        volume_array = remove_large_objects(volume_array, size_threshold=500)
+        print(f"🔍 After {method}, range: {volume_array.min()} to {volume_array.max()}")
+        
+        
+        # Create new volume node for filtered data
+        try:
+            print(f"Creating new volume node for {method}")
+            volume_node = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLScalarVolumeNode")
+            volume_node.SetName(f"Enhanced_3D_{method}_{input_volume.GetName()}")
 
-def detect_spheres(volume_node, min_radius=3, max_radius=10):
-    """
-    Detects sphere-like structures in a 3D volume using connected components.
+            # Copy spatial transformations correctly
+            ijkToRAS = vtk.vtkMatrix4x4()
+            input_volume.GetIJKToRASMatrix(ijkToRAS)
+            volume_node.SetIJKToRASMatrix(ijkToRAS)
+            volume_node.SetOrigin(input_volume.GetOrigin())
+            volume_node.SetSpacing(input_volume.GetSpacing())
 
-    Parameters:
-    - volume_node: The input 3D volume node
-    - min_radius, max_radius: Size constraints for spheres
+            # Update with new data
+            slicer.util.updateVolumeFromArray(volume_node, volume_array)
 
-    Returns:
-    - centers: List of detected sphere coordinates
-    """
-    print("🔍 Detecting spheres...")
+            enhanced_nodes[method] = volume_node
+            print(f"Volume node created and updated for {method}")
 
-    # Get numpy array from Slicer volume
-    volume_array = slicer.util.arrayFromVolume(volume_node)
+            # Save output if directory provided
+            if output_dir:
+                output_dir = Path(output_dir)
+                output_dir.mkdir(parents=True, exist_ok=True)
+                output_file = output_dir / f"Enhanced_3D_{method}_{input_volume.GetName()}.nrrd"
+                slicer.util.saveNode(volume_node, str(output_file))
+                print(f"Saved enhanced volume to {output_file}")
 
-    # Connected component labeling
-    labeled, num_features = label(volume_array, return_num=True)
+        except Exception as e:
+            logging.error(f"Error processing method {method}: {str(e)}")
 
-    # Measure region properties
-    properties = regionprops(labeled)
+    return enhanced_nodes
 
-    # Find spheres based on size & shape
-    centers = []
-    for prop in properties:
-        # Approximate volume filter based on spherical shape
-        if min_radius**3 < prop.area < max_radius**3:  
-            centers.append(prop.centroid)
+#  Main function
+def main():
+    input_volume = slicer.util.getNode("ctp.3D")
+    if not input_volume:
+        print("❌ No volume loaded in Slicer")
+        return
 
-    print(f"✅ Found {len(centers)} potential spheres")
-    return centers
+    methods = [
+        ('gamma_correction', {'gamma': 10}),
+        ('frangi', {}),
+        ('laplacian', {}),
+        ('vesselness', {'sigma': 1.5, 'alpha': 0.5, 'beta': 0.5}),
+        ('sobel', {}),
+        ('gamma_correction_2', {'gamma': 1.5}),
+    ]
 
+    enhanced_nodes = process_volume_3d(input_volume, methods=methods, output_dir=r'C:\\Users\\rocia\\Downloads\\TFG\\Cohort\\Enhance_ctp_tests\\P1\\Enhance_ctp_3D')
 
-def create_markups(centers):
-    """
-    Converts a list of 3D coordinates into a Slicer Markups Node.
-
-    Parameters:
-    - centers: List of (x, y, z) coordinates
-
-    Returns:
-    - markupsNode: The created Markups node
-    """
-    print("🎯 Creating markups...")
-
-    markupsNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLMarkupsFiducialNode")
-    markupsNode.SetName("SphereCenters")
-
-    for c in centers:
-        markupsNode.AddFiducial(c[2], c[1], c[0])  # Convert from (z, y, x) to (x, y, z)
-
-    return markupsNode
-
-
-def merge_2D_3D(centers_2D, centers_3D, distance_threshold=5):
-    """
-    Merges 2D and 3D detected points by checking proximity.
-
-    Parameters:
-    - centers_2D: List of 2D-detected coordinates
-    - centers_3D: List of 3D-detected coordinates
-    - distance_threshold: Maximum distance to consider a match
-
-    Returns:
-    - merged_centers: Final list of merged 3D points
-    """
-    print("🔗 Merging 2D and 3D detections...")
-
-    merged_centers = centers_3D.copy()  # Start with 3D points
-
-   
-    for p2d in centers_2D:
-        if all(np.linalg.norm(np.array(p2d) - np.array(p3d)) > distance_threshold for p3d in centers_3D):
-            merged_centers.append(p2d)
-
-    print(f"✅ Merged {len(merged_centers)} total points")
-    return merged_centers
-
-
-
-# # Load the input volume and ROI
-# inputVolume = slicer.util.getNode('Enhanced_Laplacian_sharpen_2_ctp.3D')  
+    if enhanced_nodes:
+        for method, node in enhanced_nodes.items():
+            print(f"✅ Enhanced volume ({method}): {node.GetName()}")
 
 
-# # # Output directory
-# outputDir = r'C:\\Users\\rocia\\Downloads\\TFG\\Cohort\\Enhance_ctp_tests\\P1\\Enhance_ctp_3D'  
+if __name__ == '__main__':
+    main()
 
-# # # Test the function 
-# enhancedVolumeNodes = enhance_ctp_3D(inputVolume,  methods=['nl_means'], outputDir=outputDir)
-
-# # # Access the enhanced volume nodes
-# for method, volume_node in enhancedVolumeNodes.items():
-#     if volume_node is not None:
-#          print(f"Enhanced volume for method '{method}': {volume_node.GetName()}")
-#     else:
-#          print(f"Enhanced volume for method '{method}': No volume node available.")
-
-#exec(open('C:/Users/rocia/AppData/Local/slicer.org/Slicer 5.6.2/SEEG_module/SEEG_masking/enhance_ctp_3D.py').read())
+#exec(open('C:/Users/rocia/AppData/Local/slicer.org/Slicer 5.6.2/SEEG_module/SEEG_masking/model_3D.py').read())
