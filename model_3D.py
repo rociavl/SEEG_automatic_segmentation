@@ -51,7 +51,18 @@ def remove_large_objects(volume, size_threshold):
 
 # Vesselness Filter without SimpleITK Hessian (Custom Implementation)
 def vesselness_filter(image, sigma=1.0, alpha=0.5, beta=0.5):
-    """Applies custom vesselness filter for enhancing vessels."""
+    """
+    Applies custom vesselness filter for enhancing vessels.
+    
+    Parameters:
+        image (numpy.ndarray): The 3D image (volume) to be filtered.
+        sigma (float): The standard deviation of the Gaussian filter used in Hessian computation.
+        alpha (float): The sensitivity parameter for vesselness calculation.
+        beta (float): The sensitivity parameter for vesselness calculation.
+        
+    Returns:
+        numpy.ndarray: The vesselness-enhanced image.
+    """
     print(f"Applying vesselness filter with sigma={sigma}, alpha={alpha}, beta={beta}")
     try:
         # Compute Hessian manually
@@ -59,9 +70,20 @@ def vesselness_filter(image, sigma=1.0, alpha=0.5, beta=0.5):
                                   gaussian_filter(image, sigma=sigma, order=(0, 2, 0)), 
                                   gaussian_filter(image, sigma=sigma, order=(0, 0, 2))])
         
-        # Apply vesselness calculation (custom implementation)
-        norm_hessian = np.linalg.norm(hessian_image, axis=0)
-        vesselness = (1 - np.exp(-norm_hessian**2 / (2 * alpha**2))) * (1 - np.exp(-norm_hessian**2 / (2 * beta**2)))
+        # Compute eigenvalues of the Hessian matrix
+        eigvals = np.linalg.eigvalsh(hessian_image)
+        
+        # Sort eigenvalues by absolute value
+        eigvals = np.sort(np.abs(eigvals), axis=0)
+        
+        # Compute vesselness measure
+        vesselness = np.zeros_like(image)
+        lambda1, lambda2, lambda3 = eigvals[0], eigvals[1], eigvals[2]
+        vesselness = (1 - np.exp(-lambda2**2 / (2 * alpha**2))) * np.exp(-lambda3**2 / (2 * beta**2))
+        
+        # Normalize vesselness
+        vesselness = (vesselness - vesselness.min()) / (vesselness.max() - vesselness.min())
+        
         return vesselness
 
     except Exception as e:
@@ -183,7 +205,7 @@ def process_volume_3d(input_volume, methods=None, output_dir=None):
             logging.warning(f"Skipping method {method} due to filter error")
             continue
 
-        volume_array = remove_large_objects(volume_array, size_threshold=500)
+        #volume_array = remove_large_objects(volume_array, size_threshold=100)
         print(f"🔍 After {method}, range: {volume_array.min()} to {volume_array.max()}")
         
         
@@ -219,30 +241,27 @@ def process_volume_3d(input_volume, methods=None, output_dir=None):
 
     return enhanced_nodes
 
-#  Main function
-def main():
-    input_volume = slicer.util.getNode("ctp.3D")
-    if not input_volume:
-        print("❌ No volume loaded in Slicer")
-        return
+# #  Main function
+# def main():
+#     input_volume = slicer.util.getNode("Filtered_gamma_2_ctp.3D")
+#     if not input_volume:
+#         print("❌ No volume loaded in Slicer")
+#         return
 
-    methods = [
-        ('gamma_correction', {'gamma': 10}),
-        ('frangi', {}),
-        ('laplacian', {}),
-        ('vesselness', {'sigma': 1.5, 'alpha': 0.5, 'beta': 0.5}),
-        ('sobel', {}),
-        ('gamma_correction_2', {'gamma': 1.5}),
-    ]
+#     methods = [
+#         ('gamma_correction', {'gamma': 1}),
+#         ('log_filter_3d', {}),
+#         ('sobel', {})
+#     ]
 
-    enhanced_nodes = process_volume_3d(input_volume, methods=methods, output_dir=r'C:\\Users\\rocia\\Downloads\\TFG\\Cohort\\Enhance_ctp_tests\\P1\\Enhance_ctp_3D')
+#     enhanced_nodes = process_volume_3d(input_volume, methods=methods, output_dir=r'C:\\Users\\rocia\\Downloads\\TFG\\Cohort\\Enhance_ctp_tests\\P1\\Enhance_ctp_3D')
 
-    if enhanced_nodes:
-        for method, node in enhanced_nodes.items():
-            print(f"✅ Enhanced volume ({method}): {node.GetName()}")
+#     if enhanced_nodes:
+#         for method, node in enhanced_nodes.items():
+#             print(f"✅ Enhanced volume ({method}): {node.GetName()}")
 
 
-if __name__ == '__main__':
-    main()
+# if __name__ == '__main__':
+#     main()
 
-#exec(open('C:/Users/rocia/AppData/Local/slicer.org/Slicer 5.6.2/SEEG_module/SEEG_masking/model_3D.py').read())
+# #exec(open('C:/Users/rocia/AppData/Local/slicer.org/Slicer 5.6.2/SEEG_module/SEEG_masking/model_3D.py').read())

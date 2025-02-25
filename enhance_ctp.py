@@ -19,7 +19,8 @@ import scipy.ndimage as ndi
 from skimage.segmentation import watershed
 from skimage import segmentation, measure, feature, draw
 from skimage.filters import sobel
-from scipy.ndimage import distance_transform_edt, label
+from scipy.ndimage import distance_transform_edt
+
 from scipy.ndimage import watershed_ift
 from skimage.feature import peak_local_max
 from skimage.segmentation import active_contour
@@ -32,10 +33,11 @@ from skimage.filters import gaussian, laplace
 from skimage.feature import canny, peak_local_max
 from skimage.transform import rescale
 from skimage.feature import peak_local_max
-from skimage.measure import regionprops
+from skimage.measure import regionprops, label
 from skimage.morphology import remove_small_objects
 import pandas as pd
 from skimage.measure import regionprops
+from skimage.filters import frangi
 
 import logging
 from skimage.feature import peak_local_max
@@ -47,6 +49,10 @@ logging.basicConfig(level=logging.DEBUG)
 
 # Define enhancement methods
 def apply_clahe(roi_volume):
+        '''
+        clipLimit: limits the contrast enhancement 
+        tileGridSize: control the contrast enhancement
+        '''
         clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(2,2))
         enhanced_slices = np.zeros_like(roi_volume)
         roi_volume_scaled = np.uint8(np.clip(roi_volume, 0, 255))  # Convert to 8-bit
@@ -99,7 +105,19 @@ def denoise_image(roi_volume, strength=10):
             denoised_slices[i] = cv2.fastNlMeansDenoising(slice_image, None, strength, 7, 21)
         return denoised_slices
    
-def anisotropic_diffusion(roi_volume, n_iter =1 , k=50, gamma=0.1):
+def anisotropic_diffusion(roi_volume, n_iter=1, k=50, gamma=0.1):
+        """
+        Apply anisotropic diffusion (total variation denoising) to each slice in the 3D volume.
+
+        Parameters:
+        - roi_volume: 3D numpy array (CT/MRI volume)
+        - n_iter: Number of iterations for the diffusion process
+        - k: Edge-stopping parameter
+        - gamma: Step size for the diffusion process
+
+        Returns:
+        - Denoised 3D volume
+        """
         denoised_slices = np.zeros_like(roi_volume)
         for i in range(roi_volume.shape[0]):
             denoised_slice = filters.denoise_tv_bregman(roi_volume[i], n_iter, k, gamma)
@@ -120,6 +138,34 @@ def unsharp_masking(image, weight=1.5, blur_radius=1):
     blurred = cv2.GaussianBlur(image, (blur_radius, blur_radius), 0)
     sharpened = cv2.addWeighted(image, 1 + weight, blurred, -weight, 0)
     return sharpened
+
+def remove_large_objects_grayscale(image, size_threshold=5000):
+    """
+    Removes large objects from a grayscale image without binarization.
+    
+    Parameters:
+        image (numpy.ndarray): The original grayscale image.
+        size_threshold (int): The maximum object size to keep.
+    
+    Returns:
+        numpy.ndarray: Image with large structures removed.
+    """
+    # Ensure input is a NumPy array
+    image = np.asarray(image, dtype=np.float32)
+
+    # 🔹 Step 1: Threshold the image to detect structures (modify percentile if needed)
+    binary_mask = image > np.percentile(image, 60)
+
+    # 🔹 Step 2: Label connected components (DO NOT use return_num=True)
+    labeled = label(binary_mask, connectivity=1)  # Ensure 3D connectivity if needed
+
+    # 🔹 Step 3: Remove large objects based on region area
+    for region in regionprops(labeled):
+        if region.area > size_threshold:
+            coords = region.coords  # Get the coordinates of the object
+            image[coords[:, 0], coords[:, 1], coords[:, 2]] = np.median(image)  # Replace with median intensity
+
+    return image
     
 def wavelet_denoise(roi_volume, wavelet='db1', level=1):
         denoised_slices = np.zeros_like(roi_volume)
@@ -141,37 +187,45 @@ def sharpen_high_pass(roi_volume, kernel_size = 1, strenght=0.5):
             sharpened_slices[i] = np.clip(slice_image + strenght * high_pass, 0, 255)
         return sharpened_slices
     
-def laplacian_sharpen(roi_volume, strength=1.5):
-        """
-        Apply Laplacian edge detection and sharpen the image while keeping the background black.
+def laplacian_sharpen(roi_volume, strength=1.5, iterations=3):
+    """
+    Apply Laplacian edge detection and sharpen the image while keeping the background black.
+    
+    Parameters:
+    - roi_volume: 3D numpy array (CT/MRI volume)
+    - strength: Intensity of sharpening
+    - iterations: Number of iterations to apply sharpening
+    
+    Returns:
+    - Sharpened 3D volume with preserved black background
+    """
+    sharpened_slices = np.zeros_like(roi_volume)
 
-        Parameters:
-        - roi_volume: 3D numpy array (CT/MRI volume)
-        - strength: Intensity of sharpening
+    for i in range(roi_volume.shape[0]):
+        slice_image = roi_volume[i]
 
-        Returns:
-        - Sharpened 3D volume with preserved black background
-        """
-        sharpened_slices = np.zeros_like(roi_volume)
+        # Convert to float32 for processing
+        slice_image_float = slice_image.astype(np.float32)
 
-        for i in range(roi_volume.shape[0]):
-            slice_image = roi_volume[i]
-
-            # Apply Laplacian filter
-            laplacian = cv2.Laplacian(slice_image, cv2.CV_64F)
+        for _ in range(iterations):
+            # Apply Laplacian filter to detect edges
+            laplacian = cv2.Laplacian(slice_image_float, cv2.CV_32F)
 
             # Ensure the Laplacian response does not shift the overall intensity
             laplacian = np.clip(laplacian, -255, 255)  # Prevent overflow
 
             # Subtract laplacian from the original to enhance edges
-            sharpened_slice = np.clip(slice_image - strength * laplacian, 0, 255)
+            slice_image_float = np.clip(slice_image_float - strength * laplacian, 0, 255)
 
-            # Ensure background remains black
-            sharpened_slice[slice_image == 0] = 0
+        # Ensure background remains black
+        slice_image_float[slice_image == 0] = 0
 
-            sharpened_slices[i] = sharpened_slice.astype(np.uint8)
+        # Convert back to uint8 for the final result
+        sharpened_slices[i] = np.clip(slice_image_float, 0, 255).astype(np.uint8)
 
-        return sharpened_slices
+    return sharpened_slices
+
+
 def adaptive_binarization(roi_volume, block_size=11, C=2, edge_strength=0.5):
         """
         Adaptive binarization with edge enhancement.
@@ -260,29 +314,58 @@ def morphological_operation(image, operation='dilate', kernel_size=3, iterations
     
     return processed_image
 
-def morph_operations(roi_volume, kernel_size=1, operation="open"):
-        """
-        Apply morphological opening or closing to each slice.
+def morph_operations(roi_volume, kernel_size=1, operation="open", iterations=1, kernel_shape="square"):
+    """
+    Apply morphological opening or closing to each slice with custom kernel shape.
 
-        Parameters:
-        - roi_volume: 3D numpy array (edge-detected volume)
-        - kernel_size: Size of the structuring element
-        - operation: "open" for noise removal, "close" for edge completion
+    Parameters:
+    - roi_volume: 3D numpy array (edge-detected volume)
+    - kernel_size: Size of the structuring element
+    - operation: "open" for noise removal, "close" for edge completion
+    - iterations: Number of times the operation is applied
+    - kernel_shape: "square", "cross" or "ellipse"
 
-        Returns:
-        - Processed 3D volume
-        """
-        kernel = np.ones((kernel_size, kernel_size), np.uint8)
-        processed_slices = np.zeros_like(roi_volume)
+    Returns:
+    - Processed 3D volume
+    """
+    # Define kernel shapes
+    if kernel_shape == "square":
+        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (kernel_size, kernel_size))
+    elif kernel_shape == "cross":
+        kernel = cv2.getStructuringElement(cv2.MORPH_CROSS, (kernel_size, kernel_size))
+    elif kernel_shape == "ellipse":
+        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (kernel_size, kernel_size))
+    else:
+        raise ValueError("Invalid kernel_shape. Use 'square', 'cross', or 'ellipse'.")
 
-        for i in range(roi_volume.shape[0]):
-            if operation == "open":
-                processed_slices[i] = cv2.morphologyEx(roi_volume[i], cv2.MORPH_OPEN, kernel)
-            elif operation == "close":
-                processed_slices[i] = cv2.morphologyEx(roi_volume[i], cv2.MORPH_CLOSE, kernel)
+    processed_slices = np.zeros_like(roi_volume)
 
-        return processed_slices
+    for i in range(roi_volume.shape[0]):
+        if operation == "open":
+            processed_slices[i] = cv2.morphologyEx(roi_volume[i], cv2.MORPH_OPEN, kernel, iterations=iterations)
+        elif operation == "close":
+            processed_slices[i] = cv2.morphologyEx(roi_volume[i], cv2.MORPH_CLOSE, kernel, iterations=iterations)
+
+    return processed_slices
+
+def apply_frangi_slice_by_slice(volume):
+    """
+    Applies the Frangi vesselness filter to a 3D volume slice-by-slice.
     
+    Parameters:
+        volume (numpy.ndarray): The 3D input image volume.
+
+    Returns:
+        numpy.ndarray: The enhanced 3D volume with Frangi applied per slice.
+    """
+    # Initialize an empty array with the same shape as input
+    enhanced_volume = np.zeros_like(volume, dtype=np.float32)
+
+    # Apply Frangi filter slice-by-slice along the Z-axis
+    for i in range(volume.shape[0]):  # Assuming (Z, Y, X) ordering
+        enhanced_volume[i] = frangi(volume[i], scale_range=(1, 5), scale_step=2)
+
+    return enhanced_volume   
     
 def contrast_stretching(roi_volume, lower_percentile=2, upper_percentile=98):
         """
@@ -836,84 +919,28 @@ def enhance_ctp(inputVolume, inputROI=None, methods = 'all', outputDir=None):
     # Apply selected enhancement methods
     enhanced_volumes = {}
     if methods == 'all':
-        enhanced_volumes['gamma_correction'] = gamma_correction(roi_volume, gamma = 5)
         
-        # Noise reduction
-        enhanced_volumes['bilateral_filter'] = bilateral_filter(enhanced_volumes['gamma_correction'], sigma_color= 50, sigma_space=50)
-        enhanced_volumes['sherpened'] = sharpen_high_pass(enhanced_volumes['bilateral_filter'], strenght = 0.5)
-        enhanced_volumes['wavelet'] = wavelet_denoise(enhanced_volumes['sherpened'])
-        
-        enhanced_volumes['clahe'] = apply_clahe(enhanced_volumes['sherpened'])
-        enhanced_volumes['gamma_2'] = gamma_correction(enhanced_volumes['clahe'], gamma = 2)
-        enhanced_volumes['high_pass'] = sharpen_high_pass(enhanced_volumes['gamma_2'])
-        ## Morphological operations
-
-        enhanced_volumes['closing'] = morph_operations(enhanced_volumes['gamma_2'], operation= 'close')
-        
-        # Edge boosting?
-        enhanced_volumes['high_pass_2'] = sharpen_high_pass(enhanced_volumes['closing'])
-        
-        # Enhance contrast 
-        enhanced_volumes['gamma_3'] = gamma_correction(enhanced_volumes['high_pass_2'], gamma = 1.8)
+        enhanced_volumes['gaussian'] = gaussian(roi_volume, sigma= 0.4)
+        enhanced_volumes['gamma_correction'] = gamma_correction(enhanced_volumes['gaussian'], gamma = 6)
+        enhanced_volumes['sharpened'] = sharpen_high_pass(enhanced_volumes['gamma_correction'], strenght = 1)
+        enhanced_volumes['erode'] = morphological_operation(enhanced_volumes['sharpened'], operation='erode', kernel_size=1)
+        enhanced_volumes['gaussian_2'] = gaussian(enhanced_volumes['erode'], sigma= 0.5)
+        enhanced_volumes['gamma_2'] = gamma_correction(enhanced_volumes['gaussian_2'], gamma= 2)
+        enhanced_volumes['opening'] = morph_operations(enhanced_volumes['gamma_2'], iterations=2, kernel_shape= 'cross')
+        enhanced_volumes['closing'] = morph_operations(enhanced_volumes['opening'], operation= 'close')
+        #enhanced_volumes['wo_large_objects'] = remove_large_objects(enhanced_volumes['closing'], size_threshold= 9000)
+        enhanced_volumes['erode_2'] = morphological_operation(enhanced_volumes['closing'], operation='erode', kernel_size=1)
         # Create an elliptical structuring element (adjust size if needed)
-        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (10, 10))
-
+        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (1, 1))
         # Apply white top-hat transformation
-        tophat = cv2.morphologyEx(enhanced_volumes['gamma_2'], cv2.MORPH_TOPHAT, kernel)
-        enhanced_volumes['tophat'] = cv2.addWeighted(enhanced_volumes['gamma_2'], 1, tophat, 2, 0)
-
-
-    ## Main Segmenting Code ##
-    print('Applying watershed with skimage...')
-
-    # Convert the 'tophat' enhanced volume to a binary mask (make sure it's NumPy array)
-    tophat_volume = enhanced_volumes['tophat']
-    binary = np.uint8(tophat_volume > 0) * 255
-    enhanced_volumes['binary_final'] = binary
-    print(f"Binary image shape: {binary.shape}, Dtype: {binary.dtype}")
-    print(f"Binary Unique Values: {np.unique(binary)}")
+        tophat = cv2.morphologyEx(enhanced_volumes['erode'], cv2.MORPH_TOPHAT, kernel)
+        enhanced_volumes['tophat'] = cv2.addWeighted(enhanced_volumes['erode'], 1, tophat, 2, 0)
+        enhanced_volumes['gamma_3'] = gamma_correction(enhanced_volumes['tophat'], gamma= 2)  
+        enhanced_volumes['gaussian_3'] = gaussian(enhanced_volumes['gamma_3'], sigma = 0.1)
     
+        enhanced_volumes['gamma_4'] = gamma_correction(enhanced_volumes['gaussian_3'], gamma= 3)
 
-    # Apply watershed directly on the 3D binary volume
-    watershed_segmented = apply_watershed_on_volume(binary)
-
-    print(f"Watershed result shape: {watershed_segmented.shape}, Dtype: {watershed_segmented.dtype}")
-    print(f"Watershed result Unique Values: {np.unique(watershed_segmented)}")
-
-    # Ensure the result is a NumPy array before updating the volume node
-    if not isinstance(watershed_segmented, np.ndarray):
-        raise TypeError("Expected a NumPy array for updateVolumeFromArray, but got a different type.")
-
-    # # Create a new scalar volume node in Slicer to store the result
-    # segmented_volume_node = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLScalarVolumeNode")
-    # segmented_volume_node.SetName('Watershed_Segmentation')
-
-    # # Ensure updateVolumeFromArray gets a NumPy array, not a vtkMRMLScalarVolumeNode
-    # slicer.util.updateVolumeFromArray(segmented_volume_node, watershed_segmented)
-
-    # Store the final segmentation in enhanced_volumes
-    enhanced_volumes['watershed'] = watershed_segmented
-
-
-    size_threshold = 2500
-    cleaned_segmented_image = remove_large_objects(watershed_segmented, size_threshold)
-
-    enhanced_volumes['watershed_small'] = cleaned_segmented_image
-
-    print('Apply Snakes for active contour')
-    snake_contour = apply_snakes_tiny(binary)
-    enhanced_volumes['snakes'] = snake_contour
-
-
-    # Apply DBSCAN clustering on the segmented volume
-    print("🧩 Applying DBSCAN clustering to 2D slices...")
-    clustered_volume, cluster_counts = apply_dbscan_2d(binary, eps=3, min_samples=15)
-    print(f"Cluster counts per slice: {cluster_counts}")
-
-    # Store the clustered results in enhanced_volumes
-    enhanced_volumes['dbscan_clusters'] = clustered_volume
-
-    print("✔ DBSCAN clustering applied and stored in enhanced_volumes['dbscan_clusters'].")
+        enhanced_volumes['MASK_LABEL'] = np.uint8(enhanced_volumes['gamma_4'] > 0) * 255
 
     # Set output directory (maybe the user doesn't have write access to the default output directory)
     if outputDir is None:
@@ -1078,34 +1105,34 @@ def save_centroids_to_csv(mask, file_path, inputVolume, enhancedVolumeNode):
 
 
 # # Load the input volume and ROI
-inputVolume = slicer.util.getNode('ctp.3D')  
-inputROI = slicer.util.getNode('P1_brain_mask')  # Brain Mask 
-# Define the file path to save the CSV
-file_path = r'C:\\Users\\rocia\\Downloads\\TFG\\Cohort\\Enhance_ctp_tests\\P1\\P1_centroids_and_coordinates.csv'
+inputVolume = slicer.util.getNode('CTp.3D')  
+inputROI = slicer.util.getNode('P5_brain_mask')  # Brain Mask 
+# # # Define the file path to save the CSV
+file_path = r'C:\\Users\\rocia\\Downloads\\TFG\\Cohort\\Enhance_ctp_tests\\P5\\P5_centroids_and_coordinates.csv'
 
-enhancedVolumeNode = slicer.util.getNode('Enhanced_gamma_3_ctp.3D')
+enhancedVolumeNode = slicer.util.getNode('Enhanced_gamma_4_CTp.3D')
 
 volume_array = slicer.util.arrayFromVolume(enhancedVolumeNode)
 
 mask_label = np.uint8(volume_array > 0) * 255
 
-# Save the centroids and coordinates to CSV
+# # # Save the centroids and coordinates to CSV
 save_centroids_to_csv(mask_label, file_path, inputVolume, enhancedVolumeNode)
 
 
 
 # # # # Output directory
-outputDir = r'C:\\Users\\rocia\\Downloads\\TFG\\Cohort\\Enhance_ctp_tests\\P1'  
+# outputDir = r'C:\\Users\\rocia\\Downloads\\TFG\\Cohort\\Enhance_ctp_tests\\P5'  
 
-# # # # Test the function 
-enhancedVolumeNodes = enhance_ctp(inputVolume, inputROI, methods='all', outputDir=outputDir)
+# # # # # # Test the function 
+# enhancedVolumeNodes = enhance_ctp(inputVolume, inputROI, methods='all', outputDir=outputDir)
 
-# # # # Access the enhanced volume nodes
-for method, volume_node in enhancedVolumeNodes.items():
-       if volume_node is not None:
-           print(f"Enhanced volume for method '{method}': {volume_node.GetName()}")
-       else:
-           print(f"Enhanced volume for method '{method}': No volume node available.")
+# # # # # # Access the enhanced volume nodes
+# for method, volume_node in enhancedVolumeNodes.items():
+#         if volume_node is not None:
+#             print(f"Enhanced volume for method '{method}': {volume_node.GetName()}")
+#         else:
+#             print(f"Enhanced volume for method '{method}': No volume node available.")
 
 
 #exec(open('C:/Users/rocia/AppData/Local/slicer.org/Slicer 5.6.2/SEEG_module/SEEG_masking/enhance_ctp.py').read())

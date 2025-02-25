@@ -34,7 +34,6 @@ from scipy import ndimage
 # SEEG_masking
 #
 
-
 class SEEG_masking(ScriptedLoadableModule):
     """Uses ScriptedLoadableModule base class, available at:
     https://github.com/Slicer/Slicer/blob/main/Base/Python/slicer/ScriptedLoadableModule.py
