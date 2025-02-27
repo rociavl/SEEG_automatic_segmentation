@@ -164,9 +164,9 @@ def process_volume_3d(input_volume, methods=None, output_dir=None):
     """Processes volume with multiple 3D enhancement methods sequentially, cascading the filters."""
     if methods is None:
         methods = [
+            ('gaussian', {'sigma': 0.5}),
             ('gamma_correction', {'gamma': 5}),
             ('laplacian', {}),
-            ('gaussian', {'sigma': 3}),
             ('vesselness', {'sigma': 1.0, 'alpha': 0.5, 'beta': 0.5}),
             ('frangi', {}),
             ('sobel', {}),

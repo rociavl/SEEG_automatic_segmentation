@@ -48,6 +48,21 @@ logging.basicConfig(level=logging.DEBUG)
 ##################################
 
 # Define enhancement methods
+
+def thresholding_volume_histogram(volume, threshold=30):
+        """
+        Apply thresholding to a 3D volume.
+        
+        Parameters:
+        - volume: 3D numpy array (CT/MRI volume)
+        - threshold: Intensity threshold for binarization
+        
+        Returns:
+        - Binarized 3D volume
+        """
+        binary_volume = np.uint8(volume > threshold) * 255
+        return binary_volume
+
 def apply_clahe(roi_volume):
         '''
         clipLimit: limits the contrast enhancement 
@@ -461,6 +476,47 @@ def sobel_edge_detection(roi_volume):
 
     return sobel_slices
 
+def enhanced_difference_of_gaussians(roi_volume, sigma1=1, sigma2=3, kernel_size=5, threshold=10):
+    """
+    Apply an enhanced Difference of Gaussians (DoG) filter to each slice of a 3D volume,
+    with post-processing to highlight small bright objects like electrodes.
+
+    Parameters:
+    - roi_volume: 3D numpy array (e.g., CT/MRI volume)
+    - sigma1: Standard deviation for the first Gaussian blur (smaller)
+    - sigma2: Standard deviation for the second Gaussian blur (larger)
+    - kernel_size: Size of the Gaussian kernel (must be odd)
+    - threshold: Intensity threshold to remove weak edges
+
+    Returns:
+    - Processed 3D volume after DoG filtering
+    """
+    processed_slices = np.zeros_like(roi_volume, dtype=np.float32)
+
+    for i in range(roi_volume.shape[0]):
+        slice_image = roi_volume[i].astype(np.float32)
+
+        # Apply Gaussian blurs
+        blur1 = cv2.GaussianBlur(slice_image, (kernel_size, kernel_size), sigma1)
+        blur2 = cv2.GaussianBlur(slice_image, (kernel_size, kernel_size), sigma2)
+
+        # Compute Difference of Gaussians
+        dog = blur1 - blur2
+
+        # Apply absolute value to enhance contrast
+        dog = np.abs(dog)
+
+        # Normalize result
+        dog = cv2.normalize(dog, None, 0, 255, cv2.NORM_MINMAX)
+
+        # Apply a binary threshold to remove weak responses
+        _, binary_dog = cv2.threshold(dog, threshold, 255, cv2.THRESH_BINARY)
+
+        # Store result
+        processed_slices[i] = binary_dog
+
+    return processed_slices.astype(np.uint8)
+
 ###############################
 ## masks and improvements ######
 #################################
@@ -586,7 +642,6 @@ def get_watershed_markers(binary):
     # Use a fixed threshold based on the distance map or other methods
     otsu_threshold = filters.threshold_otsu(distance)
     markers = measure.label(distance > otsu_threshold)  # Apply threshold
-    #print(f"Markers generated - Shape: {markers.shape}, Dtype: {markers.dtype}")
     
     return markers
 
@@ -598,22 +653,15 @@ def apply_watershed_on_volume(volume_array):
     watershed_segmented = np.zeros_like(volume_array, dtype=np.uint8)  # For final segmentation
 
     for i in range(volume_array.shape[0]):  # Iterate over slices
-        #print(f"Processing Slice {i}...")
 
         # Convert to binary slice
         binary_slice = np.uint8(volume_array[i] > 0) * 255  # Convert to binary
-        #print(f"Slice {i} - Shape: {binary_slice.shape}, Dtype: {binary_slice.dtype}")
 
         # Generate markers for the watershed algorithm
         marker_slice = get_watershed_markers(binary_slice)
-        #print(f"Slice {i} - Marker shape: {marker_slice.shape}, Dtype: {marker_slice.dtype}")
 
         # Apply watershed algorithm to the slice
-        #print(f"Applying watershed on Slice {i}...")
         segmented_slice = segmentation.watershed(-binary_slice, marker_slice)  # Use negative binary for watershed
-
-        #print(f"Slice {i} - Segmented shape: {segmented_slice.shape}, Dtype: {segmented_slice.dtype}")
-       # print(f"Slice {i} - Unique Values: {np.unique(segmented_slice)}")
 
         # Store the result of this slice in the final segmented volume
         watershed_segmented[i] = segmented_slice
@@ -797,6 +845,26 @@ def region_growing(binary, tolerance=3, min_size=5):
 
     return segmented
 
+def separate_by_erosion(mask, kernel_size=(1, 2), iterations=1):
+    """
+    Apply erosion to separate electrodes and make them thinner, without fully thinning them.
+    
+    Parameters:
+    - mask: Binary mask (electrodes = 255).
+    - kernel_size: Tuple for size of the structuring element (1x2, 2x1, etc.).
+    - iterations: Number of erosion iterations.
+    
+    Returns:
+    - Mask after erosion (separated electrodes).
+    """
+    # Create a small kernel for erosion (you can try (1, 2) or (2, 1))
+    kernel = np.ones(kernel_size, np.uint8)
+
+    # Erosion to separate the electrodes
+    eroded_mask = cv2.erode(mask, kernel, iterations=iterations)
+
+    return eroded_mask
+
 ###########################################    
 # Function to enhance the CTP.3D images ###
 ###############################################
@@ -836,19 +904,16 @@ def enhance_ctp(inputVolume, inputROI=None, methods = 'all', outputDir=None):
     largest_label = np.argmax(sizes[1:]) + 1  # Ignore background (label 0)
     largest_component = np.uint8(labeled_array == largest_label)
 
-    print(f"Number of components found: {num_features}")
-    print(f"Largest component label: {largest_label}")
-
     
     # Fill Inside the ROI
     
-    print("🖌️ Filling inside the ROI...")
+    print("Filling inside the ROI...")
     filled_roi = ndimage.binary_fill_holes(largest_component)
 
 
-    # 4. Apply Morphological Closing for Smoothing
-    print("⚙️ Applying morphological closing...")
-    struct_elem = morphology.ball(5)  # Structuring element for closing
+    # Apply Morphological Closing for Smoothing
+    print("Applying morphological closing...")
+    struct_elem = morphology.ball(5)  
     closed_roi = morphology.binary_closing(filled_roi, struct_elem)
 
 
@@ -898,7 +963,7 @@ def enhance_ctp(inputVolume, inputROI=None, methods = 'all', outputDir=None):
 
         print(f"Resampled ROI shape: {resampled_roi_array.shape}")
 
-        closed_roi = resampled_roi_array # Update roi_array
+        closed_roi = resampled_roi_array 
 
         # Ensure that the shapes match after resampling
         if closed_roi.shape != volume_array.shape:
@@ -906,7 +971,7 @@ def enhance_ctp(inputVolume, inputROI=None, methods = 'all', outputDir=None):
             print(f"Volume shape: {volume_array.shape}, Resampled ROI shape: {closed_roi.shape}")
             return None
 
-        print("ROI successfully resampled (using SimpleITK).")
+        print("ROI successfully resampled: ;).")
 
     else:
         print("ROI and input volume shapes already match.")
@@ -920,29 +985,35 @@ def enhance_ctp(inputVolume, inputROI=None, methods = 'all', outputDir=None):
     enhanced_volumes = {}
     if methods == 'all':
         
-        enhanced_volumes['gaussian'] = gaussian(roi_volume, sigma= 0.4)
-        enhanced_volumes['gamma_correction'] = gamma_correction(enhanced_volumes['gaussian'], gamma = 6)
+        ### Only CTP ###
+        enhanced_volumes['gaussian_only_ctp'] = gaussian(volume_array, sigma= 0.5)
+        enhanced_volumes['gamma_ctp'] = gamma_correction(enhanced_volumes['gaussian_only_ctp'], gamma= 10)
+        enhanced_volumes['gaussian_ctp_2'] = gaussian(enhanced_volumes['gamma_ctp'], sigma = 0.5)
+        enhanced_volumes['gamma_ctp_2'] = gamma_correction(enhanced_volumes['gaussian_ctp_2'], gamma= 2)
+        enhanced_volumes['MASK_LABEL_ctp'] = np.uint8(enhanced_volumes['gamma_ctp_2'] > 0) * 255
+
+        ### Only ROI ###
+        enhanced_volumes['gamma_correction'] = gamma_correction(roi_volume, gamma = 3)
         enhanced_volumes['sharpened'] = sharpen_high_pass(enhanced_volumes['gamma_correction'], strenght = 1)
         enhanced_volumes['erode'] = morphological_operation(enhanced_volumes['sharpened'], operation='erode', kernel_size=1)
-        enhanced_volumes['gaussian_2'] = gaussian(enhanced_volumes['erode'], sigma= 0.5)
-        enhanced_volumes['gamma_2'] = gamma_correction(enhanced_volumes['gaussian_2'], gamma= 2)
+        enhanced_volumes['gaussian_2'] = gaussian(enhanced_volumes['erode'], sigma= 0.2)
+        enhanced_volumes['gamma_2'] = gamma_correction(enhanced_volumes['gaussian_2'], gamma= 1.2)
         enhanced_volumes['opening'] = morph_operations(enhanced_volumes['gamma_2'], iterations=2, kernel_shape= 'cross')
         enhanced_volumes['closing'] = morph_operations(enhanced_volumes['opening'], operation= 'close')
         #enhanced_volumes['wo_large_objects'] = remove_large_objects(enhanced_volumes['closing'], size_threshold= 9000)
         enhanced_volumes['erode_2'] = morphological_operation(enhanced_volumes['closing'], operation='erode', kernel_size=1)
-        # Create an elliptical structuring element (adjust size if needed)
+        # Create an elliptical structuring element 
         kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (1, 1))
         # Apply white top-hat transformation
         tophat = cv2.morphologyEx(enhanced_volumes['erode'], cv2.MORPH_TOPHAT, kernel)
-        enhanced_volumes['tophat'] = cv2.addWeighted(enhanced_volumes['erode'], 1, tophat, 2, 0)
+        enhanced_volumes['tophat'] = cv2.addWeighted(enhanced_volumes['erode_2'], 1, tophat, 2, 0)
         enhanced_volumes['gamma_3'] = gamma_correction(enhanced_volumes['tophat'], gamma= 2)  
-        enhanced_volumes['gaussian_3'] = gaussian(enhanced_volumes['gamma_3'], sigma = 0.1)
-    
+        enhanced_volumes['gaussian_3'] = gaussian(enhanced_volumes['gamma_3'], sigma = 0.3)
         enhanced_volumes['gamma_4'] = gamma_correction(enhanced_volumes['gaussian_3'], gamma= 3)
-
         enhanced_volumes['MASK_LABEL'] = np.uint8(enhanced_volumes['gamma_4'] > 0) * 255
+        enhanced_volumes['thin_2'] = separate_by_erosion(enhanced_volumes['MASK_LABEL'], kernel_size=(1, 1), iterations=1)
 
-    # Set output directory (maybe the user doesn't have write access to the default output directory)
+    # Set output directory 
     if outputDir is None:
         outputDir = slicer.app.temporaryPath()  
     
@@ -1105,34 +1176,58 @@ def save_centroids_to_csv(mask, file_path, inputVolume, enhancedVolumeNode):
 
 
 # # Load the input volume and ROI
-inputVolume = slicer.util.getNode('CTp.3D')  
-inputROI = slicer.util.getNode('P5_brain_mask')  # Brain Mask 
+inputVolume = slicer.util.getNode('ctp.3D')  
+inputROI = slicer.util.getNode('P1_brain_mask')  # Brain Mask 
 # # # Define the file path to save the CSV
-file_path = r'C:\\Users\\rocia\\Downloads\\TFG\\Cohort\\Enhance_ctp_tests\\P5\\P5_centroids_and_coordinates.csv'
+# file_path = r'C:\\Users\\rocia\\Downloads\\TFG\\Cohort\\Enhance_ctp_tests\\P5\\P5_centroids_and_coordinates.csv'
 
-enhancedVolumeNode = slicer.util.getNode('Enhanced_gamma_4_CTp.3D')
+# enhancedVolumeNode = slicer.util.getNode('Enhanced_gamma_4_CTp.3D')
 
-volume_array = slicer.util.arrayFromVolume(enhancedVolumeNode)
+# volume_array = slicer.util.arrayFromVolume(enhancedVolumeNode)
 
-mask_label = np.uint8(volume_array > 0) * 255
+# mask_label = np.uint8(volume_array > 0) * 255
 
-# # # Save the centroids and coordinates to CSV
-save_centroids_to_csv(mask_label, file_path, inputVolume, enhancedVolumeNode)
+# # # # Save the centroids and coordinates to CSV
+# save_centroids_to_csv(mask_label, file_path, inputVolume, enhancedVolumeNode)
 
 
 
-# # # # Output directory
-# outputDir = r'C:\\Users\\rocia\\Downloads\\TFG\\Cohort\\Enhance_ctp_tests\\P5'  
+# # # # # Output directory
+outputDir = r'C:\\Users\\rocia\\Downloads\\TFG\\Cohort\\Enhance_ctp_tests\\P1'  
 
-# # # # # # Test the function 
-# enhancedVolumeNodes = enhance_ctp(inputVolume, inputROI, methods='all', outputDir=outputDir)
+# # # # # # # # Test the function 
+enhancedVolumeNodes = enhance_ctp(inputVolume, inputROI, methods='all', outputDir=outputDir)
 
-# # # # # # Access the enhanced volume nodes
-# for method, volume_node in enhancedVolumeNodes.items():
-#         if volume_node is not None:
-#             print(f"Enhanced volume for method '{method}': {volume_node.GetName()}")
-#         else:
-#             print(f"Enhanced volume for method '{method}': No volume node available.")
+# # # # # # # # Access the enhanced volume nodes
+for method, volume_node in enhancedVolumeNodes.items():
+           if volume_node is not None:
+               print(f"Enhanced volume for method '{method}': {volume_node.GetName()}")
+           else:
+               print(f"Enhanced volume for method '{method}': No volume node available.")
+
+
+# vol_hist = slicer.util.getNode('ctp.3D')
+
+# def show_histograms(volume_node, title='Histogram'):
+#     # Convert volume node to NumPy array
+#     vol_array = slicer.util.arrayFromVolume(volume_node)
+    
+#     if vol_array is None:
+#         raise ValueError("Failed to get voxel data from the volume node.")
+
+#     # Flatten the array and compute the histogram
+#     histogram_og, bin_edges = np.histogram(vol_array.flatten(), bins=256, range=(0, 255))
+    
+#     # Create bin centers
+#     bin_centers = (bin_edges[:-1] + bin_edges[1:]) / 2
+
+#     # Stack data into a 2D array (Slicer expects a table format)
+#     histogram_data = np.column_stack((bin_centers, histogram_og))
+
+#     # Plot histogram
+#     slicer.util.plot(histogram_data, title=title)
+
+# show_histograms(vol_hist)
 
 
 #exec(open('C:/Users/rocia/AppData/Local/slicer.org/Slicer 5.6.2/SEEG_module/SEEG_masking/enhance_ctp.py').read())
