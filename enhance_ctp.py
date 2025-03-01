@@ -21,7 +21,7 @@ from skimage import segmentation, measure, feature, draw
 from skimage.filters import sobel
 from scipy.ndimage import distance_transform_edt
 
-from scipy.ndimage import watershed_ift
+from scipy.ndimage import watershed_ift, gaussian_filter
 from skimage.feature import peak_local_max
 from skimage.segmentation import active_contour
 from skimage.draw import ellipse
@@ -38,6 +38,10 @@ from skimage.morphology import remove_small_objects
 import pandas as pd
 from skimage.measure import regionprops
 from skimage.filters import frangi
+from scipy.ndimage import median_filter
+import vtk.util.numpy_support as ns
+from skimage.morphology import disk
+from skimage.filters import median
 
 import logging
 from skimage.feature import peak_local_max
@@ -47,7 +51,78 @@ logging.basicConfig(level=logging.DEBUG)
 ### Image processing filters ###
 ##################################
 
+
 # Define enhancement methods
+
+def threshold_metal_voxels_slice_by_slice(image_array, percentile=99.5):
+    """Threshold metal voxels slice by slice."""
+    print(f"DEBUG: Input array shape: {image_array.shape}, dtype: {image_array.dtype}") 
+    if image_array.ndim != 3:
+        raise ValueError("Input must be a 3D array.")
+
+    mask = np.zeros_like(image_array, dtype=np.uint8)
+    print(f"DEBUG: Initialized mask shape: {mask.shape}, dtype: {mask.dtype}") 
+    for i in range(image_array.shape[2]):  
+        print(f"DEBUG: Processing slice {i}")
+        slice_data = image_array[:, :, i]
+        print(f"DEBUG: Slice {i} shape: {slice_data.shape}, dtype: {slice_data.dtype}") 
+
+        if not np.isfinite(slice_data).all():
+            print(f"DEBUG: Slice {i} contains NaN or Inf values. Replacing with zeros.")
+            slice_data = np.nan_to_num(slice_data)
+            print(f"DEBUG: Slice {i} after NaN/Inf removal, dtype: {slice_data.dtype}") 
+
+        threshold_value = np.nanpercentile(slice_data, percentile)
+        print(f"DEBUG: Slice {i} threshold value: {threshold_value}") 
+
+        binary_slice = (slice_data > threshold_value)
+        print(f"DEBUG: Slice {i} binary slice shape: {binary_slice.shape}, dtype: {binary_slice.dtype}") 
+        
+        mask[:, :, i] = binary_slice.astype(np.uint8)
+        print(f"DEBUG: Slice {i} mask slice shape: {mask[:,:,i].shape}, dtype: {mask[:,:,i].dtype}") 
+
+    print(f"DEBUG: Final mask shape: {mask.shape}, dtype: {mask.dtype}") 
+    print(f"DEBUG: unique values in mask: {np.unique(mask)}") 
+    return mask
+
+def apply_median_filter_2d(image_array, kernel_size_mm2=0.5, spacing=(1.0, 1.0)):
+    """
+    Apply a 2D median filter with a circular kernel (in mm²) on each slice independently.
+
+    Args:
+    - image_array (numpy.ndarray): 3D image array (Slices, Height, Width).
+    - kernel_size_mm2 (float): Area of the circular kernel in mm².
+    - spacing (tuple): Voxel spacing (dx, dy) in mm.
+
+    Returns:
+    - numpy.ndarray: 3D filtered image (processed slice-by-slice).
+    """
+    kernel_radius_pixels = int(round(np.sqrt(kernel_size_mm2 / np.pi) / min(spacing[:2])))
+    
+    selem = disk(kernel_radius_pixels)
+
+    filtered_slices = np.array([median(slice_, selem) for slice_ in image_array])
+
+    print(f"✅ 2D Median filtering complete. Kernel radius: {kernel_radius_pixels} pixels")
+    
+    return filtered_slices
+
+def apply_median_filter(image_array, kernel_size=3):
+    return median_filter(image_array, size=kernel_size)
+
+def resample_to_isotropic(image, spacing=(1.0, 1.0, 1.0)):
+    """Resample image to isotropic spacing."""
+    resampler = sitk.ResampleImageFilter()
+    resampler.SetOutputSpacing(spacing)
+    resampler.SetInterpolator(sitk.sitkLinear)
+    resampled = resampler.Execute(image)
+    return resampled
+
+
+def threshold_metal_voxels(image_array, percentile=99.5):
+    threshold_value = np.percentile(image_array, percentile)
+    return image_array > threshold_value 
+
 
 def thresholding_volume_histogram(volume, threshold=30):
         """
@@ -624,47 +699,38 @@ def remove_brain_contour_from_image(binary_image: np.ndarray, brain_mask) -> np.
     return binary_image
 
 def get_watershed_markers(binary):
-    #print("Generating watershed markers using scipy...")
+    binary = np.uint8(binary > 0) * 255  # Convert to binary mask
 
-    # Convert binary to uint8 (0 and 255)
-    binary = np.uint8(binary > 0) * 255
-    #print(f"Marker generation - Binary shape: {binary.shape}, Dtype: {binary.dtype}")
-    
     # Compute distance transform
     distance = distance_transform_edt(binary)
-    #print(f"Distance transform - Shape: {distance.shape}, Dtype: {distance.dtype}")
-    
-    # Check distance map stats
-    # print("Distance transform min:", distance.min())
-    # print("Distance transform max:", distance.max())
-    # print("Distance transform mean:", distance.mean())
-    
-    # Use a fixed threshold based on the distance map or other methods
-    otsu_threshold = filters.threshold_otsu(distance)
-    markers = measure.label(distance > otsu_threshold)  # Apply threshold
-    
+
+    # ✅ Smooth distance transform to reduce noise
+    smoothed_distance = gaussian_filter(distance, sigma=1)
+
+    # Apply Otsu threshold on smoothed distance map
+    otsu_threshold = filters.threshold_otsu(smoothed_distance)
+    markers = measure.label(smoothed_distance > otsu_threshold)  # Label regions
+
     return markers
 
-#  Apply watershed on the entire 3D volume
 def apply_watershed_on_volume(volume_array):
     print(f"apply_watershed_on_volume - Input volume shape: {volume_array.shape}")
     
-    # Initialize the watershed segmented result
-    watershed_segmented = np.zeros_like(volume_array, dtype=np.uint8)  # For final segmentation
+    # Initialize final watershed segmented volume
+    watershed_segmented = np.zeros_like(volume_array, dtype=np.uint8)
 
     for i in range(volume_array.shape[0]):  # Iterate over slices
-
-        # Convert to binary slice
         binary_slice = np.uint8(volume_array[i] > 0) * 255  # Convert to binary
-
-        # Generate markers for the watershed algorithm
         marker_slice = get_watershed_markers(binary_slice)
 
-        # Apply watershed algorithm to the slice
-        segmented_slice = segmentation.watershed(-binary_slice, marker_slice)  # Use negative binary for watershed
+        # ✅ Use distance transform instead of binary slice for better segmentation
+        distance = distance_transform_edt(binary_slice)
+        segmented_slice = segmentation.watershed(-distance, marker_slice, mask=binary_slice)
 
-        # Store the result of this slice in the final segmented volume
-        watershed_segmented[i] = segmented_slice
+        # ✅ Remove tiny objects to reduce noise
+        cleaned_segmented_slice = remove_small_objects(segmented_slice, min_size=10)
+
+        watershed_segmented[i] = cleaned_segmented_slice
 
     print(f"Watershed segmentation - Final result shape: {watershed_segmented.shape}, Dtype: {watershed_segmented.dtype}")
     return watershed_segmented
@@ -710,8 +776,8 @@ def apply_dbscan_2d(volume_array, eps=5, min_samples=10):
 
 
 def apply_gmm(image, n_components=3):
-    # Extract nonzero pixel values instead of coordinates
-    pixel_values = image[image > 0].reshape(-1, 1)  # Ensure it's (num_samples, 1)
+   
+    pixel_values = image[image > 0].reshape(-1, 1)  
 
     if pixel_values.shape[0] == 0:
         return np.zeros_like(image)  # If empty, return blank mask
@@ -741,7 +807,7 @@ def apply_gmm(image, n_components=3):
 
     except Exception as e:
         print(f"⚠️ GMM error: {e}")
-        return np.zeros_like(image)  # Return blank mask on failure
+        return np.zeros_like(image)  
 
     return gmm_image
 def apply_snakes_tiny(volume):
@@ -845,24 +911,32 @@ def region_growing(binary, tolerance=3, min_size=5):
 
     return segmented
 
-def separate_by_erosion(mask, kernel_size=(1, 2), iterations=1):
+def separate_by_erosion(mask, kernel_size_mm2=0.5, spacing=(1.0, 1.0), iterations=1):
     """
-    Apply erosion to separate electrodes and make them thinner, without fully thinning them.
-    
-    Parameters:
-    - mask: Binary mask (electrodes = 255).
-    - kernel_size: Tuple for size of the structuring element (1x2, 2x1, etc.).
-    - iterations: Number of erosion iterations.
-    
-    Returns:
-    - Mask after erosion (separated electrodes).
-    """
-    # Create a small kernel for erosion (you can try (1, 2) or (2, 1))
-    kernel = np.ones(kernel_size, np.uint8)
+    Apply erosion to separate electrodes and make them thinner, using a kernel size in mm².
 
-    # Erosion to separate the electrodes
+    Parameters:
+    - mask (numpy.ndarray): Binary mask (electrodes = 255).
+    - kernel_size_mm2 (float): Area of the structuring element in mm².
+    - spacing (tuple): Voxel spacing (dx, dy) in mm.
+    - iterations (int): Number of erosion iterations.
+
+    Returns:
+    - numpy.ndarray: Mask after erosion (separated electrodes).
+    """
+
+    kernel_radius_pixels_x = int(round(np.sqrt(kernel_size_mm2 / np.pi) / spacing[0]))
+    kernel_radius_pixels_y = int(round(np.sqrt(kernel_size_mm2 / np.pi) / spacing[1]))
+
+    kernel_size_pixels = (max(1, kernel_radius_pixels_x * 2 + 1), 
+                          max(1, kernel_radius_pixels_y * 2 + 1))
+
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, kernel_size_pixels)
+
     eroded_mask = cv2.erode(mask, kernel, iterations=iterations)
 
+    print(f"✅ Erosion applied with kernel size {kernel_size_pixels} pixels")
+    
     return eroded_mask
 
 ###########################################    
@@ -916,9 +990,14 @@ def enhance_ctp(inputVolume, inputROI=None, methods = 'all', outputDir=None):
     struct_elem = morphology.ball(5)  
     closed_roi = morphology.binary_closing(filled_roi, struct_elem)
 
+    print('Applying erosion to the brain mask...')
+    erode_roi = morphology.binary_erosion(closed_roi, morphology.ball(4))  
+
+    final_roi = closed_roi
+
 
    # Check if the shapes match
-    if closed_roi.shape != volume_array.shape:
+    if final_roi.shape != volume_array.shape:
         print("ROI and input volume shapes do not match. Resampling ROI to match input volume (using SimpleITK)...")
 
         # Get the spacing, origin, and dimensions of the input volume
@@ -963,12 +1042,12 @@ def enhance_ctp(inputVolume, inputROI=None, methods = 'all', outputDir=None):
 
         print(f"Resampled ROI shape: {resampled_roi_array.shape}")
 
-        closed_roi = resampled_roi_array 
+        final_roi = resampled_roi_array 
 
         # Ensure that the shapes match after resampling
-        if closed_roi.shape != volume_array.shape:
+        if final_roi.shape != volume_array.shape:
             print("Resampling failed. Shapes still do not match.")
-            print(f"Volume shape: {volume_array.shape}, Resampled ROI shape: {closed_roi.shape}")
+            print(f"Volume shape: {volume_array.shape}, Resampled ROI shape: {final_roi.shape}")
             return None
 
         print("ROI successfully resampled: ;).")
@@ -979,20 +1058,41 @@ def enhance_ctp(inputVolume, inputROI=None, methods = 'all', outputDir=None):
 
     # Extract the region of interest from the input volume using the binary mask
         
-    roi_volume = volume_array * closed_roi
+    roi_volume = volume_array * final_roi
+
 
     # Apply selected enhancement methods
     enhanced_volumes = {}
     if methods == 'all':
         
         ### Only CTP ###
-        enhanced_volumes['gaussian_only_ctp'] = gaussian(volume_array, sigma= 0.5)
-        enhanced_volumes['gamma_ctp'] = gamma_correction(enhanced_volumes['gaussian_only_ctp'], gamma= 10)
-        enhanced_volumes['gaussian_ctp_2'] = gaussian(enhanced_volumes['gamma_ctp'], sigma = 0.5)
-        enhanced_volumes['gamma_ctp_2'] = gamma_correction(enhanced_volumes['gaussian_ctp_2'], gamma= 2)
-        enhanced_volumes['MASK_LABEL_ctp'] = np.uint8(enhanced_volumes['gamma_ctp_2'] > 0) * 255
+        enhanced_volumes['volume_array'] = volume_array
+        enhanced_volumes['thresholded_ctp_per_og'] = threshold_metal_voxels_slice_by_slice(volume_array, percentile= 99.5)
+        enhanced_volumes['median_voxel_ctp'] = apply_median_filter_2d(enhanced_volumes['thresholded_ctp_per_og'], kernel_size_mm2=0.4)
+        enhanced_volumes['separate_erosion_ctp_og'] = separate_by_erosion(enhanced_volumes['median_voxel_ctp'], kernel_size_mm2=0.6, spacing=(1.0, 1.0), iterations=5)
+        enhanced_volumes['thresholded_ctp_per_og_2'] = threshold_metal_voxels_slice_by_slice(enhanced_volumes['separate_erosion_ctp_og'], percentile= 40)
+        enhanced_volumes['closing_ctp_og'] = morph_operations(enhanced_volumes['thresholded_ctp_per_og_2'], iterations=6, kernel_shape= 'cross', operation = 'close')
+
+        # enhanced_volumes['sobel_ctp'] = sobel_edge_detection(enhanced_volumes['closing_ctp_og'])
+
+        # enhanced_volumes['gamma_ctp'] = gamma_correction(enhanced_volumes['gaussian_only_ctp'], gamma= 10)
+        # enhanced_volumes['gaussian_ctp_2'] = gaussian(enhanced_volumes['gamma_ctp'], sigma = 0.5)
+        # enhanced_volumes['gamma_ctp_2'] = gamma_correction(enhanced_volumes['gaussian_ctp_2'], gamma= 2)
+        # enhanced_volumes['MASK_LABEL_ctp'] = np.uint8(enhanced_volumes['gamma_ctp_2'] > 0) * 255
 
         ### Only ROI ###
+        enhanced_volumes['roi_volume'] = roi_volume
+        enhanced_volumes['thresholded_ctp_per_roi'] = threshold_metal_voxels_slice_by_slice(roi_volume, percentile= 99.8)
+        enhanced_volumes['median_voxel_ctp_roi'] = apply_median_filter_2d(enhanced_volumes['thresholded_ctp_per_roi'], kernel_size_mm2=0.4)
+        enhanced_volumes['separate_erosion_roi'] = separate_by_erosion(enhanced_volumes['median_voxel_ctp_roi'], kernel_size_mm2=0.7, spacing=(1.0, 1.0), iterations=5)
+        enhanced_volumes['gaussian_roi'] = gaussian(enhanced_volumes['separate_erosion_roi'], sigma = 0.2)
+        enhanced_volumes['thresholded_ctp_roi_2'] = threshold_metal_voxels_slice_by_slice(enhanced_volumes['gaussian_roi'], percentile= 40)
+        enhanced_volumes['closing_roi'] = morph_operations(enhanced_volumes['thresholded_ctp_roi_2'], iterations=6, kernel_shape= 'cross', operation = 'close')
+        enhanced_volumes['remove_contour_roi'] = remove_brain_contour_from_image(enhanced_volumes['closing_roi'], brain_mask= final_roi)
+        enhanced_volumes['watershed_roi'] = apply_watershed_on_volume(enhanced_volumes['remove_contour_roi'])
+
+
+       ### ROI gamma###
         enhanced_volumes['gamma_correction'] = gamma_correction(roi_volume, gamma = 3)
         enhanced_volumes['sharpened'] = sharpen_high_pass(enhanced_volumes['gamma_correction'], strenght = 1)
         enhanced_volumes['erode'] = morphological_operation(enhanced_volumes['sharpened'], operation='erode', kernel_size=1)
@@ -1010,8 +1110,31 @@ def enhance_ctp(inputVolume, inputROI=None, methods = 'all', outputDir=None):
         enhanced_volumes['gamma_3'] = gamma_correction(enhanced_volumes['tophat'], gamma= 2)  
         enhanced_volumes['gaussian_3'] = gaussian(enhanced_volumes['gamma_3'], sigma = 0.3)
         enhanced_volumes['gamma_4'] = gamma_correction(enhanced_volumes['gaussian_3'], gamma= 3)
-        enhanced_volumes['MASK_LABEL'] = np.uint8(enhanced_volumes['gamma_4'] > 0) * 255
-        enhanced_volumes['thin_2'] = separate_by_erosion(enhanced_volumes['MASK_LABEL'], kernel_size=(1, 1), iterations=1)
+        enhanced_volumes['MASK_LABEL'] = threshold_metal_voxels_slice_by_slice(enhanced_volumes['gamma_4'] , percentile= 99.8)
+
+        
+
+        # enhanced_volumes['gamma_correction'] = gamma_correction(enhanced_volumes['closing_roi'], gamma = 5)
+        # enhanced_volumes['sharpened'] = sharpen_high_pass(enhanced_volumes['gamma_correction'], strenght = 1)
+        # enhanced_volumes['erode'] = morphological_operation(enhanced_volumes['sharpened'], operation='erode', kernel_size=1)
+        # enhanced_volumes['gaussian_2'] = gaussian(enhanced_volumes['erode'], sigma= 0.2)
+        # enhanced_volumes['gamma_2'] = gamma_correction(enhanced_volumes['gaussian_2'], gamma= 1.2)
+
+
+        # enhanced_volumes['opening'] = morph_operations(enhanced_volumes['gamma_2'], iterations=2, kernel_shape= 'cross')
+        # enhanced_volumes['closing'] = morph_operations(enhanced_volumes['opening'], operation= 'close')
+        # #enhanced_volumes['wo_large_objects'] = remove_large_objects(enhanced_volumes['closing'], size_threshold= 9000)
+        # enhanced_volumes['erode_2'] = morphological_operation(enhanced_volumes['closing'], operation='erode', kernel_size=1)
+        # # Create an elliptical structuring element 
+        # kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (1, 1))
+        # # Apply white top-hat transformation
+        # tophat = cv2.morphologyEx(enhanced_volumes['erode'], cv2.MORPH_TOPHAT, kernel)
+        # enhanced_volumes['tophat'] = cv2.addWeighted(enhanced_volumes['erode_2'], 1, tophat, 2, 0)
+        # enhanced_volumes['gamma_3'] = gamma_correction(enhanced_volumes['tophat'], gamma= 2)  
+        # enhanced_volumes['gaussian_3'] = gaussian(enhanced_volumes['gamma_3'], sigma = 0.3)
+        # enhanced_volumes['gamma_4'] = gamma_correction(enhanced_volumes['gaussian_3'], gamma= 3)
+        # enhanced_volumes['MASK_LABEL'] = np.uint8(enhanced_volumes['gamma_4'] > 0) * 255
+
 
     # Set output directory 
     if outputDir is None:
@@ -1106,60 +1229,67 @@ def add_more_filter(inputVolume, selected_filters=None, outputDir=None):
 ####################
 
 
-def label_and_get_centroids(mask):
-    """
-    Label each connected component in a binary mask and calculate the centroids.
+def label_and_get_centroids(mask, spacing):
 
-    Parameters:
-        mask (numpy.ndarray): A binary image where connected regions represent different objects.
+    labeled_mask = label(mask)
 
-    Returns:
-        pandas.DataFrame: A DataFrame with the region labels, coordinates, and centroids.
-    """
-    # Label connected components in the mask
-    labeled_mask = measure.label(mask)
-    
-    # Get the properties of labeled regions
     regions = regionprops(labeled_mask)
-    
-    # Prepare lists to store the information
+
+
     region_data = []
 
     for region in regions:
         label = region.label
         centroid = region.centroid
-        coords = region.coords  # List of coordinates for the region
+        # Ensure coordinates are 3D, even if only 2D
+        z_coord = centroid[2] if len(centroid) > 2 else None
+
+
+        region_volume_voxels = region.area
+
+        # Calculate the physical volume (in mm³) based on the voxel spacing
+        region_volume_mm3 = region_volume_voxels * (spacing[0] * spacing[1] * spacing[2])
+
+        # Get the bounding box dimensions in voxel units
+        minr, minc, minz, maxr, maxc, maxz = region.bbox
+        x_size_voxels = maxc - minc
+        y_size_voxels = maxr - minr
+        z_size_voxels = maxz - minz
+
+        # Convert bounding box dimensions from voxels to mm
+        x_size_mm = x_size_voxels * spacing[0]
+        y_size_mm = y_size_voxels * spacing[1]
+        z_size_mm = z_size_voxels * spacing[2]
 
         # Store data in a dictionary format
-        for coord in coords:
-            region_data.append({
-                'Label': label,
-                'X': coord[0],  # Row index (Y in image terms)
-                'Y': coord[1],  # Column index (X in image terms)
-                'Z': coord[2] if len(coord) > 2 else None,  # Z-coordinate (for 3D images)
-                'Centroid_X': centroid[0],
-                'Centroid_Y': centroid[1],
-                'Centroid_Z': centroid[2] if len(centroid) > 2 else None
-            })
+        region_data.append({
+            'Label': label,
+            'Centroid_X': centroid[0],
+            'Centroid_Y': centroid[1],
+            'Centroid_Z': z_coord,
+            'Volume_Voxels': region_volume_voxels,
+            'Volume_mm3': region_volume_mm3,
+            'X_Size_Voxels': x_size_voxels,
+            'Y_Size_Voxels': y_size_voxels,
+            'Z_Size_Voxels': z_size_voxels,
+            'X_Size_mm': x_size_mm,
+            'Y_Size_mm': y_size_mm,
+            'Z_Size_mm': z_size_mm
+        })
     
     # Create a DataFrame to store the data
     df = pd.DataFrame(region_data)
     
     return df
 
-def save_centroids_to_csv(mask, file_path, inputVolume, enhancedVolumeNode):
-    """
-    Label regions in the mask, compute centroids, and save the data to a CSV file.
-    Also, copies the spatial transformation information (origin, spacing, and IJK to RAS matrix).
 
-    Parameters:
-        mask (numpy.ndarray): Binary mask image.
-        file_path (str): Path where to save the CSV file.
-        inputVolume (vtk.vtkImageData): The input volume node from which to copy the transformation.
-        enhancedVolumeNode (vtk.vtkMRMLVolumeNode): The enhanced volume node to which the transformation will be set.
-    """
-    # Get the labeled regions and their centroids
-    df = label_and_get_centroids(mask)
+def save_centroids_to_csv(mask, file_path, inputVolume, enhancedVolumeNode):
+
+
+    spacing = inputVolume.GetSpacing() 
+
+    # Get the labeled regions and their centroids, volumes, and bounding box sizes
+    df = label_and_get_centroids(mask, spacing)
     
     # Copy the original volume's transformation information to the enhanced volume
     enhancedVolumeNode.SetOrigin(inputVolume.GetOrigin())
@@ -1177,7 +1307,7 @@ def save_centroids_to_csv(mask, file_path, inputVolume, enhancedVolumeNode):
 
 # # Load the input volume and ROI
 inputVolume = slicer.util.getNode('ctp.3D')  
-inputROI = slicer.util.getNode('P1_brain_mask')  # Brain Mask 
+inputROI = slicer.util.getNode('P1_brain_mask_trial')  # Brain Mask 
 # # # Define the file path to save the CSV
 # file_path = r'C:\\Users\\rocia\\Downloads\\TFG\\Cohort\\Enhance_ctp_tests\\P5\\P5_centroids_and_coordinates.csv'
 
@@ -1195,15 +1325,15 @@ inputROI = slicer.util.getNode('P1_brain_mask')  # Brain Mask
 # # # # # Output directory
 outputDir = r'C:\\Users\\rocia\\Downloads\\TFG\\Cohort\\Enhance_ctp_tests\\P1'  
 
-# # # # # # # # Test the function 
+# # # # # # # # # Test the function 
 enhancedVolumeNodes = enhance_ctp(inputVolume, inputROI, methods='all', outputDir=outputDir)
 
-# # # # # # # # Access the enhanced volume nodes
+# # # # # # # # # Access the enhanced volume nodes
 for method, volume_node in enhancedVolumeNodes.items():
-           if volume_node is not None:
-               print(f"Enhanced volume for method '{method}': {volume_node.GetName()}")
-           else:
-               print(f"Enhanced volume for method '{method}': No volume node available.")
+            if volume_node is not None:
+                print(f"Enhanced volume for method '{method}': {volume_node.GetName()}")
+            else:
+                print(f"Enhanced volume for method '{method}': No volume node available.")
 
 
 # vol_hist = slicer.util.getNode('ctp.3D')
