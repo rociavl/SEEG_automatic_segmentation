@@ -569,11 +569,13 @@ class SEEG_maskingLogic:
         dims = inputImage.GetDimensions() # No funciona
 
         smooth_input = filters.gaussian(inputArray, sigma=2)
+        print(f"Min: {inputArray.min()}, Max: {inputArray.max()}, Mean: {inputArray.mean()}")
+
         
         # Apply binarization logic: all non-zero values become 1, zero stays as 0
         thresh = filters.threshold_otsu(smooth_input)
         
-        maskArray = (smooth_input > thresh).astype(np.uint8)  # All non-zero become 1
+        maskArray = (inputArray > 30).astype(np.uint8)  
         maskArray = maskArray.reshape(dims)
         print("Mask array dtype:", maskArray.dtype)
         print("Unique values in mask array:", np.unique(maskArray))
@@ -581,14 +583,11 @@ class SEEG_maskingLogic:
         print("Input array shape:", inputArray.shape)
         print("Mask array shape:", maskArray.shape)
         print("Selem shape:", selem_close.shape)
-        closed = ndimage.binary_closing(maskArray, structure=selem_close, iterations=3).astype(np.uint8)
+        closed = ndimage.binary_closing(maskArray, structure=selem_close, iterations=6).astype(np.uint8)
         
         filled = ndimage.binary_fill_holes(closed).astype(np.uint8)
-
-        selem_dilate = ndimage.generate_binary_structure(3, 1) # 3D structuring element
-        dilated = ndimage.binary_dilation(filled, structure=selem_dilate, iterations=4).astype(np.uint8)
         
-        final_flat = dilated.ravel()
+        final_flat = filled.ravel()
   
 
         # Convert the mask (NumPy array) back to VTK format

@@ -20,7 +20,7 @@ from skimage.segmentation import watershed
 from skimage import segmentation, measure, feature, draw
 from skimage.filters import sobel
 from scipy.ndimage import distance_transform_edt
-
+from skimage.restoration import denoise_nl_means
 from scipy.ndimage import watershed_ift, gaussian_filter
 from skimage.feature import peak_local_max
 from skimage.segmentation import active_contour
@@ -178,22 +178,29 @@ def local_threshold(roi_volume):
         binary_local_uint8 = np.uint8(binary_local * 255)  # Convert to uint8 (0 or 255)
         return binary_local_uint8
     
-def denoise_image(roi_volume, strength=10):
-        """
-        Denoise each slice in the 3D volume using Non-Local Means Denoising.
-        
-        Parameters:
-        - roi_volume: 3D numpy array (CT/MRI volume)
-        - strength: Denoising strength (higher means more denoising)
-        
-        Returns:
-        - Denoised 3D volume
-        """
-        denoised_slices = np.zeros_like(roi_volume)
-        for i in range(roi_volume.shape[0]):
-            slice_image = roi_volume[i]
-            denoised_slices[i] = cv2.fastNlMeansDenoising(slice_image, None, strength, 7, 21)
-        return denoised_slices
+def denoise_2d_slices(volume, patch_size=5, patch_distance=6, h=0.1):
+    """
+    Denoise a 3D volume slice by slice using Non-Local Means Denoising.
+
+    Parameters:
+    - volume: 3D numpy array (CT/MRI volume)
+    - patch_size: The size of the patches used for comparison (default is 5)
+    - patch_distance: The maximum distance between patches to compare (default is 6)
+    - h: Filtering parameter (higher values result in more smoothing)
+
+    Returns:
+    - Denoised 3D volume
+    """
+    # Initialize an empty array to hold the denoised volume
+    denoised_volume = np.zeros_like(volume)
+
+    # Apply Non-Local Means Denoising to each slice
+    for i in range(volume.shape[0]):  # Iterate through the slices (z-axis)
+        slice_image = volume[i]  # Extract the i-th 2D slice
+        denoised_slice = denoise_nl_means(slice_image, patch_size=patch_size, patch_distance=patch_distance, h=h, multichannel=False)
+        denoised_volume[i] = denoised_slice  # Assign the denoised slice back to the volume
+
+    return denoised_volume
    
 def anisotropic_diffusion(roi_volume, n_iter=1, k=50, gamma=0.1):
         """
@@ -624,6 +631,29 @@ def remove_large_objects(segmented_image, size_threshold):
     
     return filtered_image
 
+def denoise_2d_slices(volume, patch_size=2, patch_distance=2, h=0.1):
+    """
+    Denoise a 3D volume slice by slice using Non-Local Means Denoising.
+
+    Parameters:
+    - volume: 3D numpy array (CT/MRI volume)
+    - patch_size: The size of the patches used for comparison (default is 5)
+    - patch_distance: The maximum distance between patches to compare (default is 6)
+    - h: Filtering parameter (higher values result in more smoothing)
+
+    Returns:
+    - Denoised 3D volume
+    """
+    # Initialize an empty array to hold the denoised volume
+    denoised_volume = np.zeros_like(volume)
+
+    # Apply Non-Local Means Denoising to each slice
+    for i in range(volume.shape[0]):  # Iterate through the slices (z-axis)
+        slice_image = volume[i]  # Extract the i-th 2D slice
+        denoised_slice = denoise_nl_means(slice_image, patch_size=patch_size, patch_distance=patch_distance, h=h)
+        denoised_volume[i] = denoised_slice  # Assign the denoised slice back to the volume
+
+    return denoised_volume
 
 def vtk_to_numpy(vtk_image_node):
     """Convert vtkMRMLScalarVolumeNode to numpy array."""
@@ -653,7 +683,7 @@ def generate_contour_mask(brain_mask, dilation_iterations=1):
     Returns:
       - contour_mask: The computed contour mask.
     """
-    # Convert brain_mask to a NumPy array if it isn't already
+
     if not isinstance(brain_mask, np.ndarray):
         brain_mask = slicer.util.arrayFromVolume(brain_mask)
     
@@ -664,39 +694,11 @@ def generate_contour_mask(brain_mask, dilation_iterations=1):
     kernel = np.ones((3, 3), np.uint8)
     # Dilate the brain mask
     dilated_mask = cv2.dilate(brain_mask, kernel, iterations=dilation_iterations)
-    # Subtract the original mask from the dilated mask to obtain the contour
+
     contour_mask = cv2.subtract(dilated_mask, brain_mask)
     
     return contour_mask
 
-def remove_brain_contour_from_image(binary_image: np.ndarray, brain_mask) -> np.ndarray:
-    """
-    Removes the brain contour from the binary image using a provided brain mask.
-
-    Parameters:
-        binary_image (np.ndarray): The binary image to be processed.
-        brain_mask (np.ndarray or vtkMRMLScalarVolumeNode): The brain mask.
-
-    Returns:
-        np.ndarray: The binary image with the brain contour removed.
-    """
-    if brain_mask is None:
-        return binary_image
-
-    # Convert brain_mask to a NumPy array if it is not already one.
-    if not isinstance(brain_mask, np.ndarray):
-        brain_mask = slicer.util.arrayFromVolume(brain_mask)
-
-    # Check that shapes match.
-    if binary_image.shape != brain_mask.shape:
-        raise ValueError("Binary image and brain mask dimensions do not match.")
-
-    # Generate the contour mask from the brain mask.
-    contour_mask = generate_contour_mask(brain_mask)
-    # Remove the contour pixels from the binary image.
-    binary_image[contour_mask > 0] = 0
-
-    return binary_image
 
 def get_watershed_markers(binary):
     binary = np.uint8(binary > 0) * 255  # Convert to binary mask
@@ -723,11 +725,11 @@ def apply_watershed_on_volume(volume_array):
         binary_slice = np.uint8(volume_array[i] > 0) * 255  # Convert to binary
         marker_slice = get_watershed_markers(binary_slice)
 
-        # ✅ Use distance transform instead of binary slice for better segmentation
+        # Use distance transform instead of binary slice for better segmentation
         distance = distance_transform_edt(binary_slice)
         segmented_slice = segmentation.watershed(-distance, marker_slice, mask=binary_slice)
 
-        # ✅ Remove tiny objects to reduce noise
+        # Remove tiny objects to reduce noise
         cleaned_segmented_slice = remove_small_objects(segmented_slice, min_size=10)
 
         watershed_segmented[i] = cleaned_segmented_slice
@@ -828,7 +830,7 @@ def apply_snakes_tiny(volume):
         slice_2d = volume[i]  # Extract 2D slice
         
         # Apply the canny edge detection (to detect edges)
-        edges = feature.canny(slice_2d)  # Works with 2D array
+        edges = feature.canny(slice_2d)  
         
         # Define an initial contour (e.g., an ellipse in the center of the image)
         s = np.zeros(slice_2d.shape)
@@ -911,33 +913,44 @@ def region_growing(binary, tolerance=3, min_size=5):
 
     return segmented
 
-def separate_by_erosion(mask, kernel_size_mm2=0.5, spacing=(1.0, 1.0), iterations=1):
+def separate_by_erosion_and_closing(mask, kernel_size_mm2=0.5, spacing=(1.0, 1.0), erosion_iterations=1, closing_iterations=1):
     """
-    Apply erosion to separate electrodes and make them thinner, using a kernel size in mm².
+    Apply gentle erosion and closing to shrink mask while keeping electrodes intact.
 
     Parameters:
     - mask (numpy.ndarray): Binary mask (electrodes = 255).
     - kernel_size_mm2 (float): Area of the structuring element in mm².
     - spacing (tuple): Voxel spacing (dx, dy) in mm.
-    - iterations (int): Number of erosion iterations.
+    - erosion_iterations (int): Number of erosion iterations.
+    - closing_iterations (int): Number of closing iterations.
 
     Returns:
-    - numpy.ndarray: Mask after erosion (separated electrodes).
+    - numpy.ndarray: Mask after erosion and closing.
     """
+    
+    # Ensure binary mask (0 and 255)
+    mask = np.uint8(mask > 0) * 255  
 
+    # Compute kernel size in pixels
     kernel_radius_pixels_x = int(round(np.sqrt(kernel_size_mm2 / np.pi) / spacing[0]))
     kernel_radius_pixels_y = int(round(np.sqrt(kernel_size_mm2 / np.pi) / spacing[1]))
 
-    kernel_size_pixels = (max(1, kernel_radius_pixels_x * 2 + 1), 
-                          max(1, kernel_radius_pixels_y * 2 + 1))
+    # Ensure kernel size is at least 3x3 pixels
+    kernel_size_pixels = (max(3, kernel_radius_pixels_x * 2 + 1), 
+                          max(3, kernel_radius_pixels_y * 2 + 1))
 
+    # Use a small circular kernel for gentle erosion
     kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, kernel_size_pixels)
 
-    eroded_mask = cv2.erode(mask, kernel, iterations=iterations)
+    # Apply gentle erosion
+    eroded_mask = cv2.erode(mask, kernel, iterations=erosion_iterations)
 
-    print(f"✅ Erosion applied with kernel size {kernel_size_pixels} pixels")
+    # Apply closing to restore small details that may have been lost during erosion
+    closed_mask = cv2.morphologyEx(eroded_mask, cv2.MORPH_CLOSE, kernel, iterations=closing_iterations)
+
+    print(f"✅ Erosion and closing applied with kernel size {kernel_size_pixels} pixels")
     
-    return eroded_mask
+    return closed_mask
 
 ###########################################    
 # Function to enhance the CTP.3D images ###
@@ -954,124 +967,129 @@ def enhance_ctp(inputVolume, inputROI=None, methods = 'all', outputDir=None):
         return None
 
     # Use inputVolume as inputROI if inputROI is not provided
-    if inputROI is None:
-        inputROI = inputVolume
+    if inputROI is not None:
 
-    # Convert ROI (binary mask) to numpy array
-    roi_array = slicer.util.arrayFromVolume(inputROI)
-    
-
-    # Ensure ROI is binary (mask), converting to 0s and 1s
-    roi_array = np.uint8(roi_array > 0)
-
-    print(f"Shape of input volume: {volume_array.shape}")  
-    print(f"Shape of ROI mask: {roi_array.shape}")
-    
-    # Find connected models 
-    print('Finding connected components')
-    labeled_array, num_features = ndimage.label(roi_array)
-
-    # Selecting the largest component
-
-    print("📏 Selecting the largest component...")
-    sizes = ndimage.sum(roi_array, labeled_array, range(num_features + 1))
-    largest_label = np.argmax(sizes[1:]) + 1  # Ignore background (label 0)
-    largest_component = np.uint8(labeled_array == largest_label)
-
-    
-    # Fill Inside the ROI
-    
-    print("Filling inside the ROI...")
-    filled_roi = ndimage.binary_fill_holes(largest_component)
-
-
-    # Apply Morphological Closing for Smoothing
-    print("Applying morphological closing...")
-    struct_elem = morphology.ball(5)  
-    closed_roi = morphology.binary_closing(filled_roi, struct_elem)
-
-    print('Applying erosion to the brain mask...')
-    erode_roi = morphology.binary_erosion(closed_roi, morphology.ball(4))  
-
-    final_roi = closed_roi
-
-
-   # Check if the shapes match
-    if final_roi.shape != volume_array.shape:
-        print("ROI and input volume shapes do not match. Resampling ROI to match input volume (using SimpleITK)...")
-
-        # Get the spacing, origin, and dimensions of the input volume
-        reference_spacing = inputVolume.GetSpacing()
-        reference_origin = inputVolume.GetOrigin()
-        reference_size = volume_array.shape  # (x, y, z) dimensions
-
-        print(f"Reference Spacing: {reference_spacing}")
-        print(f"Reference Origin: {reference_origin}")
-        print(f"Reference Dimensions: {reference_size}")
-
-        # Get the ROI data as a NumPy array
+        # Convert ROI (binary mask) to numpy array
         roi_array = slicer.util.arrayFromVolume(inputROI)
+        
 
-        # Transpose the ROI array *before* converting to SimpleITK
-        roi_array = np.transpose(roi_array)
+        # Ensure ROI is binary (mask), converting to 0s and 1s
+        roi_array = np.uint8(roi_array > 0)
 
-        # Convert ROI array to SimpleITK image
-        roi_image_sitk = sitk.GetImageFromArray(roi_array)
-        roi_image_sitk.SetSpacing(inputROI.GetSpacing())
-        roi_image_sitk.SetOrigin(inputROI.GetOrigin())
+        print(f"Shape of input volume: {volume_array.shape}")  
+        print(f"Shape of ROI mask: {roi_array.shape}")
+        
+        # Find connected models 
+        print('Finding connected components')
+        labeled_array, num_features = ndimage.label(roi_array)
 
-        # Create SimpleITK image for the reference volume (for geometry)
-        reference_image_sitk = sitk.Image(reference_size, sitk.sitkUInt8)  # Create an empty image
-        reference_image_sitk.SetSpacing(reference_spacing)
-        reference_image_sitk.SetOrigin(reference_origin)
+        # Selecting the largest component
 
-        # Resample the ROI using SimpleITK
-        resampler = sitk.ResampleImageFilter()
-        resampler.SetReferenceImage(reference_image_sitk)  # Match geometry
-        resampler.SetInterpolator(sitk.sitkNearestNeighbor)  # Preserve binary values
-        resampler.SetOutputPixelType(sitk.sitkUInt8)
-        resampled_roi_image_sitk = resampler.Execute(roi_image_sitk)
+        print("📏 Selecting the largest component...")
+        sizes = ndimage.sum(roi_array, labeled_array, range(num_features + 1))
+        largest_label = np.argmax(sizes[1:]) + 1  # Ignore background (label 0)
+        largest_component = np.uint8(labeled_array == largest_label)
 
-        # Convert the resampled SimpleITK image back to a NumPy array
-        resampled_roi_array = sitk.GetArrayFromImage(resampled_roi_image_sitk)
+        
+        # Fill Inside the ROI
+        
+        print("Filling inside the ROI...")
+        filled_roi = ndimage.binary_fill_holes(largest_component)
 
-        # Transpose the array *after* resampling
-        resampled_roi_array = np.transpose(resampled_roi_array)
 
-        resampled_roi_array = np.uint8(resampled_roi_array > 0) # Ensure binary
+        # Apply Morphological Closing for Smoothing
+        print("Applying morphological closing...")
+        struct_elem = morphology.ball(5)  
+        closed_roi = morphology.binary_closing(filled_roi, struct_elem)
 
-        print(f"Resampled ROI shape: {resampled_roi_array.shape}")
+        print('Applying erosion to the brain mask...')
+        erode_roi = morphology.binary_opening(closed_roi, morphology.ball(3))  
 
-        final_roi = resampled_roi_array 
+        final_roi = erode_roi
 
-        # Ensure that the shapes match after resampling
+
+    # Check if the shapes match
         if final_roi.shape != volume_array.shape:
-            print("Resampling failed. Shapes still do not match.")
-            print(f"Volume shape: {volume_array.shape}, Resampled ROI shape: {final_roi.shape}")
-            return None
+            print("ROI and input volume shapes do not match. Resampling ROI to match input volume (using SimpleITK)...")
 
-        print("ROI successfully resampled: ;).")
+            # Get the spacing, origin, and dimensions of the input volume
+            reference_spacing = inputVolume.GetSpacing()
+            reference_origin = inputVolume.GetOrigin()
+            reference_size = volume_array.shape  # (x, y, z) dimensions
+
+            print(f"Reference Spacing: {reference_spacing}")
+            print(f"Reference Origin: {reference_origin}")
+            print(f"Reference Dimensions: {reference_size}")
+
+            # Get the ROI data as a NumPy array
+            roi_array = slicer.util.arrayFromVolume(inputROI)
+
+            # Transpose the ROI array *before* converting to SimpleITK
+            roi_array = np.transpose(roi_array)
+
+            # Convert ROI array to SimpleITK image
+            roi_image_sitk = sitk.GetImageFromArray(roi_array)
+            roi_image_sitk.SetSpacing(inputROI.GetSpacing())
+            roi_image_sitk.SetOrigin(inputROI.GetOrigin())
+
+            # Create SimpleITK image for the reference volume (for geometry)
+            reference_image_sitk = sitk.Image(reference_size, sitk.sitkUInt8)  # Create an empty image
+            reference_image_sitk.SetSpacing(reference_spacing)
+            reference_image_sitk.SetOrigin(reference_origin)
+
+            # Resample the ROI using SimpleITK
+            resampler = sitk.ResampleImageFilter()
+            resampler.SetReferenceImage(reference_image_sitk)  # Match geometry
+            resampler.SetInterpolator(sitk.sitkNearestNeighbor)  # Preserve binary values
+            resampler.SetOutputPixelType(sitk.sitkUInt8)
+            resampled_roi_image_sitk = resampler.Execute(roi_image_sitk)
+
+            # Convert the resampled SimpleITK image back to a NumPy array
+            resampled_roi_array = sitk.GetArrayFromImage(resampled_roi_image_sitk)
+
+            # Transpose the array *after* resampling
+            resampled_roi_array = np.transpose(resampled_roi_array)
+
+            resampled_roi_array = np.uint8(resampled_roi_array > 0) # Ensure binary
+
+            print(f"Resampled ROI shape: {resampled_roi_array.shape}")
+
+            final_roi = resampled_roi_array 
+
+            # Ensure that the shapes match after resampling
+            if final_roi.shape != volume_array.shape:
+                print("Resampling failed. Shapes still do not match.")
+                print(f"Volume shape: {volume_array.shape}, Resampled ROI shape: {final_roi.shape}")
+                return None
+
+            print("ROI successfully resampled: ;).")
+
+        else:
+            print("ROI and input volume shapes already match.")
+
+
+        # Extract the region of interest from the input volume using the binary mask
+        dimmed_mask = final_roi * 0.1  
+        roi_volume = volume_array* dimmed_mask
 
     else:
-        print("ROI and input volume shapes already match.")
-
-
-    # Extract the region of interest from the input volume using the binary mask
-        
-    roi_volume = volume_array * final_roi
-
-
+         roi_volume = volume_array
     # Apply selected enhancement methods
     enhanced_volumes = {}
     if methods == 'all':
         
         ### Only CTP ###
         enhanced_volumes['volume_array'] = volume_array
-        enhanced_volumes['thresholded_ctp_per_og'] = threshold_metal_voxels_slice_by_slice(volume_array, percentile= 99.5)
-        enhanced_volumes['median_voxel_ctp'] = apply_median_filter_2d(enhanced_volumes['thresholded_ctp_per_og'], kernel_size_mm2=0.4)
-        enhanced_volumes['separate_erosion_ctp_og'] = separate_by_erosion(enhanced_volumes['median_voxel_ctp'], kernel_size_mm2=0.6, spacing=(1.0, 1.0), iterations=5)
-        enhanced_volumes['thresholded_ctp_per_og_2'] = threshold_metal_voxels_slice_by_slice(enhanced_volumes['separate_erosion_ctp_og'], percentile= 40)
-        enhanced_volumes['closing_ctp_og'] = morph_operations(enhanced_volumes['thresholded_ctp_per_og_2'], iterations=6, kernel_shape= 'cross', operation = 'close')
+
+        enhanced_volumes['thre_volume_og'] = (volume_array > 1200).astype(np.uint8)
+        enhanced_volumes['gaussian_volume_og'] = gaussian(enhanced_volumes['thre_volume_og'], sigma=0.5)
+        enhanced_volumes['gamma_volume_og_2'] = gamma_correction(enhanced_volumes['gaussian_volume_og'], gamma=2)
+        enhanced_volumes['thresholded_ctp_per_og'] = threshold_metal_voxels_slice_by_slice(enhanced_volumes['gamma_volume_og_2'], percentile= 99.5)
+
+        # enhanced_volumes['median_voxel_ctp'] = apply_median_filter_2d(enhanced_volumes['thresholded_ctp_per_og'], kernel_size_mm2=0.4)
+        # enhanced_volumes['separate_erosion_ctp_og'] = separate_by_erosion(enhanced_volumes['median_voxel_ctp'], kernel_size_mm2=0.6, spacing=(1.0, 1.0), iterations=5)
+        # enhanced_volumes['thresholded_ctp_per_og_2'] = threshold_metal_voxels_slice_by_slice(enhanced_volumes['separate_erosion_ctp_og'], percentile= 40)
+        # enhanced_volumes['closing_ctp_og'] = morph_operations(enhanced_volumes['thresholded_ctp_per_og_2'], iterations=6, kernel_shape= 'cross', operation = 'close')
 
         # enhanced_volumes['sobel_ctp'] = sobel_edge_detection(enhanced_volumes['closing_ctp_og'])
 
@@ -1082,35 +1100,34 @@ def enhance_ctp(inputVolume, inputROI=None, methods = 'all', outputDir=None):
 
         ### Only ROI ###
         enhanced_volumes['roi_volume'] = roi_volume
-        enhanced_volumes['thresholded_ctp_per_roi'] = threshold_metal_voxels_slice_by_slice(roi_volume, percentile= 99.8)
-        enhanced_volumes['median_voxel_ctp_roi'] = apply_median_filter_2d(enhanced_volumes['thresholded_ctp_per_roi'], kernel_size_mm2=0.4)
-        enhanced_volumes['separate_erosion_roi'] = separate_by_erosion(enhanced_volumes['median_voxel_ctp_roi'], kernel_size_mm2=0.7, spacing=(1.0, 1.0), iterations=5)
-        enhanced_volumes['gaussian_roi'] = gaussian(enhanced_volumes['separate_erosion_roi'], sigma = 0.2)
-        enhanced_volumes['thresholded_ctp_roi_2'] = threshold_metal_voxels_slice_by_slice(enhanced_volumes['gaussian_roi'], percentile= 40)
-        enhanced_volumes['closing_roi'] = morph_operations(enhanced_volumes['thresholded_ctp_roi_2'], iterations=6, kernel_shape= 'cross', operation = 'close')
-        enhanced_volumes['remove_contour_roi'] = remove_brain_contour_from_image(enhanced_volumes['closing_roi'], brain_mask= final_roi)
-        enhanced_volumes['watershed_roi'] = apply_watershed_on_volume(enhanced_volumes['remove_contour_roi'])
+        
+        enhanced_volumes['thresholded_ctp_per_roi'] = threshold_metal_voxels_slice_by_slice(roi_volume, percentile= 99.9)
+
 
 
        ### ROI gamma###
-        enhanced_volumes['gamma_correction'] = gamma_correction(roi_volume, gamma = 3)
+        enhanced_volumes['gaussian_volume_roi'] = gaussian(roi_volume, sigma=0.3)
+        enhanced_volumes['gamma_correction'] = gamma_correction(enhanced_volumes['gaussian_volume_roi'] , gamma = 3)
+        enhanced_volumes['denoised_roi'] = denoise_2d_slices(enhanced_volumes['gaussian_volume_roi'], patch_size=6, patch_distance=6, h=0.4)
+        enhanced_volumes['thresholded_denoised_roi'] = threshold_metal_voxels_slice_by_slice(enhanced_volumes['denoised_roi'], percentile= 99.9)
         enhanced_volumes['sharpened'] = sharpen_high_pass(enhanced_volumes['gamma_correction'], strenght = 1)
         enhanced_volumes['erode'] = morphological_operation(enhanced_volumes['sharpened'], operation='erode', kernel_size=1)
         enhanced_volumes['gaussian_2'] = gaussian(enhanced_volumes['erode'], sigma= 0.2)
         enhanced_volumes['gamma_2'] = gamma_correction(enhanced_volumes['gaussian_2'], gamma= 1.2)
-        enhanced_volumes['opening'] = morph_operations(enhanced_volumes['gamma_2'], iterations=2, kernel_shape= 'cross')
-        enhanced_volumes['closing'] = morph_operations(enhanced_volumes['opening'], operation= 'close')
-        #enhanced_volumes['wo_large_objects'] = remove_large_objects(enhanced_volumes['closing'], size_threshold= 9000)
-        enhanced_volumes['erode_2'] = morphological_operation(enhanced_volumes['closing'], operation='erode', kernel_size=1)
-        # Create an elliptical structuring element 
-        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (1, 1))
-        # Apply white top-hat transformation
-        tophat = cv2.morphologyEx(enhanced_volumes['erode'], cv2.MORPH_TOPHAT, kernel)
-        enhanced_volumes['tophat'] = cv2.addWeighted(enhanced_volumes['erode_2'], 1, tophat, 2, 0)
-        enhanced_volumes['gamma_3'] = gamma_correction(enhanced_volumes['tophat'], gamma= 2)  
-        enhanced_volumes['gaussian_3'] = gaussian(enhanced_volumes['gamma_3'], sigma = 0.3)
+        # enhanced_volumes['opening'] = morph_operations(enhanced_volumes['gamma_2'], iterations=2, kernel_shape= 'cross')
+        # enhanced_volumes['closing'] = morph_operations(enhanced_volumes['opening'], operation= 'close')
+        # #enhanced_volumes['wo_large_objects'] = remove_large_objects(enhanced_volumes['closing'], size_threshold= 9000)
+        # enhanced_volumes['erode_2'] = morphological_operation(enhanced_volumes['closing'], operation='erode', kernel_size=1)
+        # # Create an elliptical structuring element 
+        # kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (1, 1))
+        # # Apply white top-hat transformation
+        # tophat = cv2.morphologyEx(enhanced_volumes['erode'], cv2.MORPH_TOPHAT, kernel)
+        # enhanced_volumes['tophat'] = cv2.addWeighted(enhanced_volumes['erode_2'], 1, tophat, 2, 0)
+        # enhanced_volumes['gamma_3'] = gamma_correction(enhanced_volumes['tophat'], gamma= 2)  
+        enhanced_volumes['gaussian_3'] = gaussian(enhanced_volumes['gamma_2'], sigma = 0.3)
         enhanced_volumes['gamma_4'] = gamma_correction(enhanced_volumes['gaussian_3'], gamma= 3)
         enhanced_volumes['MASK_LABEL'] = threshold_metal_voxels_slice_by_slice(enhanced_volumes['gamma_4'] , percentile= 99.8)
+
 
         
 
@@ -1228,13 +1245,20 @@ def add_more_filter(inputVolume, selected_filters=None, outputDir=None):
       
 ####################
 
-
 def label_and_get_centroids(mask, spacing):
+    """
+    Label a binary mask and extract centroids, volumes, and bounding box sizes for each region.
 
+    Args:
+        mask (ndarray): Binary mask (2D or 3D).
+        spacing (tuple): Voxel spacing in mm (x, y, z).
+
+    Returns:
+        pd.DataFrame: DataFrame containing region properties.
+    """
+    # Label the mask
     labeled_mask = label(mask)
-
     regions = regionprops(labeled_mask)
-
 
     region_data = []
 
@@ -1242,24 +1266,26 @@ def label_and_get_centroids(mask, spacing):
         label = region.label
         centroid = region.centroid
         # Ensure coordinates are 3D, even if only 2D
-        z_coord = centroid[2] if len(centroid) > 2 else None
-
-
-        region_volume_voxels = region.area
+        z_coord = centroid[2] if len(centroid) > 2 else 0  # Default to 0 for 2D masks
 
         # Calculate the physical volume (in mm³) based on the voxel spacing
+        region_volume_voxels = region.area
         region_volume_mm3 = region_volume_voxels * (spacing[0] * spacing[1] * spacing[2])
 
         # Get the bounding box dimensions in voxel units
         minr, minc, minz, maxr, maxc, maxz = region.bbox
         x_size_voxels = maxc - minc
         y_size_voxels = maxr - minr
-        z_size_voxels = maxz - minz
+        z_size_voxels = maxz - minz if len(centroid) > 2 else 1  # Default to 1 for 2D masks
 
         # Convert bounding box dimensions from voxels to mm
         x_size_mm = x_size_voxels * spacing[0]
         y_size_mm = y_size_voxels * spacing[1]
         z_size_mm = z_size_voxels * spacing[2]
+
+        # Intensity statistics (optional)
+        intensity_mean = np.mean(mask[labeled_mask == label])
+        intensity_variance = np.var(mask[labeled_mask == label])
 
         # Store data in a dictionary format
         region_data.append({
@@ -1274,7 +1300,9 @@ def label_and_get_centroids(mask, spacing):
             'Z_Size_Voxels': z_size_voxels,
             'X_Size_mm': x_size_mm,
             'Y_Size_mm': y_size_mm,
-            'Z_Size_mm': z_size_mm
+            'Z_Size_mm': z_size_mm,
+            'Intensity_Mean': intensity_mean,
+            'Intensity_Variance': intensity_variance
         })
     
     # Create a DataFrame to store the data
@@ -1282,15 +1310,26 @@ def label_and_get_centroids(mask, spacing):
     
     return df
 
-
 def save_centroids_to_csv(mask, file_path, inputVolume, enhancedVolumeNode):
+    """
+    Save centroids and region properties to a CSV file.
 
+    Args:
+        mask (ndarray): Binary mask (2D or 3D).
+        file_path (str): Path to save the CSV file.
+        inputVolume: Input volume node (for spacing and transformation).
+        enhancedVolumeNode: Enhanced volume node (for setting transformation).
+    """
+    # Validate inputs
+    if mask is None or inputVolume is None:
+        raise ValueError("Mask and input volume must be provided.")
 
-    spacing = inputVolume.GetSpacing() 
+    # Get the voxel spacing
+    spacing = inputVolume.GetSpacing()
 
     # Get the labeled regions and their centroids, volumes, and bounding box sizes
     df = label_and_get_centroids(mask, spacing)
-    
+
     # Copy the original volume's transformation information to the enhanced volume
     enhancedVolumeNode.SetOrigin(inputVolume.GetOrigin())
     enhancedVolumeNode.SetSpacing(inputVolume.GetSpacing())
@@ -1299,7 +1338,7 @@ def save_centroids_to_csv(mask, file_path, inputVolume, enhancedVolumeNode):
     ijkToRasMatrix = vtk.vtkMatrix4x4()
     inputVolume.GetIJKToRASMatrix(ijkToRasMatrix)
     enhancedVolumeNode.SetIJKToRASMatrix(ijkToRasMatrix)
-    
+
     # Save the DataFrame to a CSV file
     df.to_csv(file_path, index=False)
     print(f"Data saved to {file_path}")
@@ -1307,7 +1346,7 @@ def save_centroids_to_csv(mask, file_path, inputVolume, enhancedVolumeNode):
 
 # # Load the input volume and ROI
 inputVolume = slicer.util.getNode('ctp.3D')  
-inputROI = slicer.util.getNode('P1_brain_mask_trial')  # Brain Mask 
+inputROI = slicer.util.getNode('P1_brain_mask_good_2')  # Brain Mask 
 # # # Define the file path to save the CSV
 # file_path = r'C:\\Users\\rocia\\Downloads\\TFG\\Cohort\\Enhance_ctp_tests\\P5\\P5_centroids_and_coordinates.csv'
 
