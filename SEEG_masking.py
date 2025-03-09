@@ -537,24 +537,9 @@ class SEEG_maskingLogic:
         maskVolumeNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLScalarVolumeNode")
         #maskVolumeNode.DeepCopy(inputVolume)
         maskVolumeNode.SetName(f"Generated Mask_{inputVolume.GetName()}")
-        
-        # Set essential properties from the input volume
-        #maskVolumeNode.SetSpacing(inputVolume.GetSpacing())
-        #maskVolumeNode.SetOrigin(inputVolume.GetOrigin())
-
         maskVolumeNode.CopyOrientation(inputVolume)  
 
 
-        #matrix = vtk.vtkMatrix4x4()
-        #inputVolume.GetIJKToRASMatrix(matrix)
-        #maskVolumeNode.SetIJKToRASMatrix(matrix)
-        
-        # Copying the display node from the input volume
-        #inputImage = inputVolume.GetImageData()
-        #if inputImage:
-         #   outputImage = vtk.vtkImageData()
-          #  outputImage.DeepCopy(inputImage)
-           # maskVolumeNode.SetAndObserveImageData(outputImage) # Set the image data to the new volume node
         
         if inputVolume.GetImageData():
             maskVolumeNode.SetAndObserveImageData(inputVolume.GetImageData())
