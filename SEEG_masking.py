@@ -560,7 +560,7 @@ class SEEG_maskingLogic:
         # Apply binarization logic: all non-zero values become 1, zero stays as 0
         thresh = filters.threshold_otsu(smooth_input)
         
-        maskArray = (inputArray > 50).astype(np.uint8)  
+        maskArray = (inputArray > 25).astype(np.uint8)  
         maskArray = maskArray.reshape(dims)
         print("Mask array dtype:", maskArray.dtype)
         print("Unique values in mask array:", np.unique(maskArray))

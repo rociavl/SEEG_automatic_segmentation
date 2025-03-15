@@ -199,5 +199,7 @@ def resample_roi(inputVolumeName, inputROIName, outputPath, output_dimensions=(1
         slicer.util.errorDisplay(f"❌ Error: {str(e)}")
         raise
 
-resample_roi('CTp.3D', 'patient6_mask', r'C:\\Users\\rocia\\Downloads\\TFG\\Cohort\\Enhance_ctp_tests\\patient6_resampled_mask.nrrd', 
+resample_roi('CTp.3D', 'patient7_mask_2', r'C:\\Users\\rocia\\Downloads\\TFG\\Cohort\\Enhance_ctp_tests\\patient7_resampled_mask.nrrd', 
              max_dilation_iterations=10, tolerance=0.95, z_offset=0, verbose=True)
+
+#exec(open('C:/Users/rocia/AppData/Local/slicer.org/Slicer 5.6.2/SEEG_module/SEEG_masking/resample_roi.py').read())

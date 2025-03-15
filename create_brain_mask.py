@@ -1,200 +1,175 @@
 import os
 import numpy as np
-import random
 import torch
-import torch.nn as nn
 import torch.optim as optim
-from torch.utils.data import DataLoader, Dataset
-import SimpleITK as sitk
-import matplotlib.pyplot as plt
-import os
-import numpy as np
-import SimpleITK as sitk
-from collections import defaultdict
+import torch.nn.functional as F
+from monai import transforms
+from monai.networks.nets import UNet
+from monai.data import DataLoader, Dataset
+from monai.transforms import LoadImage  # Correct import for LoadImage
+import nrrd
+from sklearn.metrics import jaccard_score
+import torch.amp
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-# Set dataset paths
-ct_dir = "C:/dataset/CTs"
-mask_dir = "C:/dataset/Masks"
+# prompt: import drive mount
 
-# Patients available in dataset
-valid_patients = {"patient1", "patient4", "patient5", "patient6", "patient8"}
+from google.colab import drive
+drive.mount('/content/drive')
 
-# Function to load NRRD files safely
-def load_nrrd(file_path):
-    """Load an NRRD file as a NumPy array with error handling."""
-    try:
-        image = sitk.ReadImage(file_path)
-        array = sitk.GetArrayFromImage(image)
-        return array.astype(np.float32)
-    except Exception as e:
-        print(f"❌ Error loading {file_path}: {e}")
-        return None
 
-# Normalize CT scans to [0, 1] range
-def normalize_ct(ct_array):
-    """Normalize CT scan values between 0 and 1."""
-    min_val, max_val = np.min(ct_array), np.max(ct_array)
-    return (ct_array - min_val) / (max_val - min_val + 1e-8)  # Avoid division by zero
+ct_dir = "/content/drive/MyDrive/TFG 💪🧠/Code/Modelos /Brain_mask_model/Dataset/CT"
+mask_dir = "/content/drive/MyDrive/TFG 💪🧠/Code/Modelos /Brain_mask_model/Dataset/MASK"
 
-# Data Augmentation
-def augment_data(ct_array, mask_array):
-    """Apply random flips, intensity scaling, and Gaussian noise."""
-    # Random horizontal flip
-    if random.random() > 0.5:
-        ct_array = np.flip(ct_array, axis=2)
-        mask_array = np.flip(mask_array, axis=2)
+# Function to pair CT scans and masks
+def get_paired_files(ct_path, mask_path):
+    ct_files = {f.split('_')[0]: f for f in os.listdir(ct_path) if f.endswith(".nrrd")}
+    mask_files = {f.split('_')[0]: f for f in os.listdir(mask_path) if f.endswith(".nrrd")}
+    
+    paired_files = []
+    for patient_id in ct_files.keys():
+        if patient_id in mask_files:
+            paired_files.append((ct_files[patient_id], mask_files[patient_id]))
+        else:
+            print(f"Warning: No mask found for {ct_files[patient_id]}")
 
-    # Random vertical flip
-    if random.random() > 0.5:
-        ct_array = np.flip(ct_array, axis=1)
-        mask_array = np.flip(mask_array, axis=1)
+    return paired_files
 
-    # Random depth flip (Z-axis)
-    if random.random() > 0.5:
-        ct_array = np.flip(ct_array, axis=0)
-        mask_array = np.flip(mask_array, axis=0)
+file_pairs = get_paired_files(ct_dir, mask_dir)
 
-    # Random intensity scaling
-    if random.random() > 0.5:
-        scale_factor = random.uniform(0.9, 1.1)
-        ct_array *= scale_factor
+class NRRDDataset(Dataset):
+    def __init__(self, ct_path, mask_path, file_pairs, transform=None):
+        self.ct_path = ct_path
+        self.mask_path = mask_path
+        self.file_pairs = file_pairs
+        self.transform = transform
 
-    # Add random Gaussian noise
-    if random.random() > 0.5:
-        noise = np.random.normal(0, 0.02, ct_array.shape)
-        ct_array = np.clip(ct_array + noise, 0, 1)  # Keep values in [0,1]
-
-    return ct_array, mask_array
-
-# Load all patient CTs and masks
-ct_images, masks = [], []
-
-for patient_id in valid_patients:
-    ct_path = os.path.join(ct_dir, f"{patient_id}_CT.nrrd")
-    if not os.path.exists(ct_path):
-        print(f"⚠️ Missing CT scan for {patient_id}, skipping...")
-        continue
-
-    # Load CT scan
-    ct_array = load_nrrd(ct_path)
-    if ct_array is None:
-        continue
-    ct_array = normalize_ct(ct_array)
-
-    # Load corresponding masks
-    patient_masks = [os.path.join(mask_dir, f) for f in os.listdir(mask_dir) if f.startswith(f"{patient_id}_mask")]
-    if not patient_masks:
-        print(f"⚠️ No masks found for {patient_id}, skipping...")
-        continue
-
-    # Combine all masks into a single binary mask
-    mask_arrays = [load_nrrd(mask_path) for mask_path in patient_masks if load_nrrd(mask_path) is not None]
-    if not mask_arrays:
-        continue
-    combined_mask = np.clip(np.sum(mask_arrays, axis=0), 0, 1)  # Ensure binary mask
-
-    # Apply augmentation
-    ct_array, combined_mask = augment_data(ct_array, combined_mask)
-
-    # Store in lists
-    ct_images.append(ct_array)
-    masks.append(combined_mask.astype(np.uint8))
-
-# Convert lists to NumPy arrays
-ct_images = np.array(ct_images)
-masks = np.array(masks)
-
-# Print dataset information
-print(f"✅ Loaded Dataset: {len(ct_images)} CT scans, {len(masks)} masks")
-print(f"Shape: CT {ct_images.shape}, Masks {masks.shape}")
-
-# Torch Dataset Class
-class BrainDataset(Dataset):
-    def __init__(self, ct_images, masks):
-        self.ct_images = torch.tensor(ct_images, dtype=torch.float32).unsqueeze(1)  # Add channel dim
-        self.masks = torch.tensor(masks, dtype=torch.float32).unsqueeze(1)  # Add channel dim
+        # LoadImage is a MONAI transform to load .nrrd files
+        self.load_ct = LoadImage(image_only=True)
+        self.load_mask = LoadImage(image_only=True)
 
     def __len__(self):
-        return len(self.ct_images)
+        return len(self.file_pairs)
 
     def __getitem__(self, idx):
-        return self.ct_images[idx], self.masks[idx]
+        ct_file, mask_file = self.file_pairs[idx]
+        
+        ct_data = self.load_ct(os.path.join(self.ct_path, ct_file))
+        mask_data = self.load_mask(os.path.join(self.mask_path, mask_file))
 
-# Create Dataset and DataLoader
-dataset = BrainDataset(ct_images, masks)
-train_loader = DataLoader(dataset, batch_size=2, shuffle=True)
+        # Normalize CT scans to [0,1]
+        ct_data = np.clip(ct_data, -1000, 1000)  
+        ct_data = (ct_data + 1000) / 2000  
 
-print("🔥 DataLoader Ready!")
+        # Ensure binary masks
+        mask_data = (mask_data > 0).astype(np.float32)  
+
+        sample = {"image": ct_data, "mask": mask_data}
+
+        if self.transform:
+            # Apply transforms to 'image' and 'mask' separately
+            sample["image"] = self.transform(sample["image"])  
+            sample["mask"] = self.transform(sample["mask"])
+
+        return sample["image"], sample["mask"]
+from monai.transforms import Compose, Resize, RandRotate, RandFlip, RandShiftIntensity, RandAffine, ToTensor
+
+# Define transformations for data augmentation
+transform = Compose([
+    Resize(spatial_size=(256, 256, 256)),  # Resize the 3D volumes to 256x256x256
+    RandRotate(range_x=90, range_y=90, range_z=90),  # Random 90-degree rotation for each axis
+    RandFlip(prob=0.5, spatial_axis=(0, 1, 2)),  # Random flip with a 50% probability along all axes
+    RandShiftIntensity(offsets=(0.1, 0.2)),  # Random intensity shift (brightness adjustment)
+    RandAffine(prob=0.5, translate_range=(10, 10, 10), rotate_range=(10, 10, 10), scale_range=(0.1, 0.1, 0.1)),  # Random affine transformation
+    ToTensor(),  # Convert data to torch tensors
+])
 
 
-class UNet3D(nn.Module):
-    def __init__(self, in_channels=1, out_channels=1):
-        super(UNet3D, self).__init__()
+dataset = NRRDDataset(ct_dir, mask_dir, file_pairs, transform=transform)
+dataloader = DataLoader(dataset, batch_size=4, shuffle=True)
 
-        self.encoder = nn.Sequential(
-            nn.Conv3d(in_channels, 64, kernel_size=3, padding=1), nn.ReLU(),
-            nn.Conv3d(64, 64, kernel_size=3, padding=1), nn.ReLU(),
-            nn.MaxPool3d(2)
-        )
+model = UNet(
+    spatial_dims=3,  # 3D convolutions
+    in_channels=1,   # Single channel input (grayscale CT)
+    out_channels=1,  # Binary output (mask)
+    channels=(16, 32, 64, 128, 256),
+    strides=(2, 2, 2, 2),  # Downsampling strides
+    num_res_units=2,  # Number of residual units
+).to(device)
 
-        self.decoder = nn.Sequential(
-            nn.Conv3d(64, 64, kernel_size=3, padding=1), nn.ReLU(),
-            nn.Conv3d(64, out_channels, kernel_size=3, padding=1), nn.Sigmoid()
-        )
+# Define Dice + BCE Loss
+class DiceBCELoss(torch.nn.Module):
+    def __init__(self):
+        super(DiceBCELoss, self).__init__()
 
-    def forward(self, x):
-        x = self.encoder(x)
-        x = self.decoder(x)
-        return x
+    def forward(self, pred, target):
+        bce = F.binary_cross_entropy_with_logits(pred, target)
+        smooth = 1e-5
+        pred = torch.sigmoid(pred)
+        intersection = (pred * target).sum()
+        dice = (2. * intersection + smooth) / (pred.sum() + target.sum() + smooth)
+        return 1 - dice + bce
 
-device = "cuda" if torch.cuda.is_available() else "cpu"
-model = UNet3D().to(device)
+# Optimizer & Scheduler
+loss_fn = DiceBCELoss()
+optimizer = optim.AdamW(model.parameters(), lr=1e-4, weight_decay=1e-5)
+scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=10)
 
-# Optimizer & Loss Function
-optimizer = optim.Adam(model.parameters(), lr=0.001)
-loss_fn = nn.BCELoss()  # Binary segmentation loss
+# Mixed Precision Scaler
+scaler = torch.amp.GradScaler()
 
-# Training Loop
-epochs = 20
-for epoch in range(epochs):
+
+def train_model(model, dataloader, loss_fn, optimizer, scheduler, epochs=10):
     model.train()
-    epoch_loss = 0
-    for ct_batch, mask_batch in train_loader:
-        ct_batch, mask_batch = ct_batch.to(device), mask_batch.to(device)
 
-        optimizer.zero_grad()
-        output = model(ct_batch)
-        loss = loss_fn(output, mask_batch)
-        loss.backward()
-        optimizer.step()
+    for epoch in range(epochs):
+        epoch_loss = 0
+        for images, masks in dataloader:
+            images, masks = images.to(device).float(), masks.to(device).float()  # Ensure float32
 
-        epoch_loss += loss.item()
+            optimizer.zero_grad()
 
-    print(f"Epoch {epoch+1}/{epochs}, Loss: {epoch_loss / len(train_loader):.4f}")
+            # Mixed precision
+            with torch.amp.autocast('cuda'):
+                outputs = model(images)
+                loss = loss_fn(outputs, masks)
 
-# Save the model
-torch.jit.script(model).save("brain_mask_model_3D.pth")
-print("Model saved successfully!")
+            scaler.scale(loss).backward()
+            scaler.step(optimizer)
+            scaler.update()
+            scheduler.step()
+
+            epoch_loss += loss.item()
+
+        print(f"Epoch [{epoch+1}/{epochs}], Loss: {epoch_loss/len(dataloader):.4f}")
 
 # Evaluation function
-def evaluate_model(model, ct_images, masks, batch_size=2):
+def evaluate_model(model, dataloader):
     model.eval()
+    dice_scores = []
+    iou_scores = []
+
     with torch.no_grad():
-        total_correct = 0
-        total_pixels = 0
-        for ct_batch, mask_batch in zip(ct_images, masks):
-            ct_batch = torch.tensor(ct_batch).unsqueeze(0).unsqueeze(0).float().to(device)
-            mask_batch = torch.tensor(mask_batch).unsqueeze(0).unsqueeze(0).float().to(device)
+        for images, masks in dataloader:
+            images, masks = images.to(device).float(), masks.to(device).float()  # Ensure float32
 
-            output = model(ct_batch)
-            pred = output > 0.5  # Threshold the output
+            with torch.amp.autocast('cuda'):
+                outputs = torch.sigmoid(model(images)).cpu().numpy()
+                masks = masks.cpu().numpy()
 
-            total_correct += (pred == mask_batch).sum().item()
-            total_pixels += torch.numel(mask_batch)
+            outputs = (outputs > 0.5).astype(np.uint8)
 
-        accuracy = total_correct / total_pixels
-        print(f"Model Accuracy: {accuracy * 100:.2f}%")
+            for i in range(len(outputs)):
+                intersection = (outputs[i] * masks[i]).sum()
+                dice = (2. * intersection) / (outputs[i].sum() + masks[i].sum() + 1e-5)
+                iou = jaccard_score(masks[i].flatten(), outputs[i].flatten(), average='binary')
 
-# Evaluate the model on the training data
-evaluate_model(model, ct_images, masks)
+                dice_scores.append(dice)
+                iou_scores.append(iou)
 
+    print(f"Mean Dice Score: {np.mean(dice_scores):.4f}")
+    print(f"Mean IoU Score: {np.mean(iou_scores):.4f}")
+
+train_model(model, dataloader, loss_fn, optimizer, scheduler, epochs=20)
+
+evaluate_model(model, dataloader)

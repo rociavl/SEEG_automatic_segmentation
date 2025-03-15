@@ -83,9 +83,9 @@ def create_electrode_mask_from_fiducials_and_save_csv(fiducial_data, volume_path
 # list_fiducials(combined_fiducial_data)
 
 
-volume_path = r"C:\\Users\\rocia\\Downloads\\TFG\\Cohort\\Maks_tests\\P1_brain_mask_25.nrrd"
-output_filename = r"C:\\Users\\rocia\\Downloads\\TFG\\Cohort\\P1_electrode_fiducials.nrrd"
-csv_filename = r"C:\\Users\\rocia\\Downloads\\TFG\\Cohort\\P1_electrode_fiducials.csv"
+# volume_path = r"C:\\Users\\rocia\\Downloads\\TFG\\Cohort\\Maks_tests\\P1_brain_mask_25.nrrd"
+# output_filename = r"C:\\Users\\rocia\\Downloads\\TFG\\Cohort\\P1_electrode_fiducials.nrrd"
+# csv_filename = r"C:\\Users\\rocia\\Downloads\\TFG\\Cohort\\P1_electrode_fiducials.csv"
 
 
 # create_electrode_mask_from_fiducials_and_save_csv(combined_fiducial_data, volume_path, output_filename,csv_filename, radius_mm=0.4)
