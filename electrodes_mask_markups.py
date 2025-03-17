@@ -6,15 +6,17 @@ import csv
 def get_fiducials_from_slicer(node_name):
     node = slicer.util.getNode(node_name)  
     fiducial_data = []
+    number_electrodes = 0
     
-    for i in range(node.GetNumberOfFiducials()):
-        label = node.GetNthFiducialLabel(i)
+    for i in range(node.GetNumberOfControlPoints()):  # Use GetNumberOfControlPoints() instead of GetNumberOfFiducials()
+        label = node.GetNthControlPointLabel(i)  # Use GetNthControlPointLabel() instead of GetNthFiducialLabel()
         position = [0.0, 0.0, 0.0]
-        node.GetNthFiducialPosition(i, position)
+        node.GetNthControlPointPosition(i, position)  # Use GetNthControlPointPosition() instead of GetNthFiducialPosition()
     
         fiducial_data.append((label, position[0], position[1], position[2]))
+        number_electrodes += 1
     
-    return fiducial_data
+    return fiducial_data, number_electrodes
 
 
 def list_fiducials(fiducial_data):
@@ -75,20 +77,22 @@ def create_electrode_mask_from_fiducials_and_save_csv(fiducial_data, volume_path
     sitk.WriteImage(mask_image, output_filename)
 
 # Get fiducials from two different markups nodes
-# fiducial_data_node_1 = get_fiducials_from_slicer("real-P")  
-# fiducial_data_node_2 = get_fiducials_from_slicer("real-WM")  
+fiducial_data_node_1, number_electrodes_1 = get_fiducials_from_slicer("real-P")  
+fiducial_data_node_2, number_electrodes_2 = get_fiducials_from_slicer("real-WM")  
 
-# combined_fiducial_data = fiducial_data_node_1 + fiducial_data_node_2  
+combined_fiducial_data = fiducial_data_node_1 + fiducial_data_node_2  
+total_electrodes = number_electrodes_1 + number_electrodes_2
 
 # list_fiducials(combined_fiducial_data)
 
 
-# volume_path = r"C:\\Users\\rocia\\Downloads\\TFG\\Cohort\\Maks_tests\\P1_brain_mask_25.nrrd"
-# output_filename = r"C:\\Users\\rocia\\Downloads\\TFG\\Cohort\\P1_electrode_fiducials.nrrd"
-# csv_filename = r"C:\\Users\\rocia\\Downloads\\TFG\\Cohort\\P1_electrode_fiducials.csv"
+volume_path = r"C:\\Users\\rocia\\Downloads\\TFG\\Cohort\\Models\\Model_brain_mask\\Dataset\\MASK\\patient1_mask_2.nrrd"
+output_filename = r"C:\\Users\\rocia\\Downloads\\TFG\\Cohort\\P1_electrode_fiducials_1_mm.nrrd"
+csv_filename = r"C:\\Users\\rocia\\Downloads\\TFG\\Cohort\\P1_electrode_fiducials.csv"
 
 
-# create_electrode_mask_from_fiducials_and_save_csv(combined_fiducial_data, volume_path, output_filename,csv_filename, radius_mm=0.4)
+create_electrode_mask_from_fiducials_and_save_csv(combined_fiducial_data, volume_path, output_filename,csv_filename, radius_mm=1)
+print(f'Total number of electrodes: {total_electrodes}')
 
 
 #exec(open('C:/Users/rocia/AppData/Local/slicer.org/Slicer 5.6.2/SEEG_module/SEEG_masking/electrodes_mask_markups.py').read())

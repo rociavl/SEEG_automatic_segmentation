@@ -1106,16 +1106,16 @@ def enhance_ctp(inputVolume, inputROI=None, methods = 'all', outputDir=None):
         #CLAHE
         ###enhanced_volumes['OG_CLAHE_VOLUME_OG'] = apply_clahe(enhanced_volumes['OG_volume_array'])
         enhanced_volumes['OG_gamma_volume_og'] = gamma_correction(enhanced_volumes['OG_gaussian_volume_og'] , gamma=3)
-        enhanced_volumes['DESCARGAR_og_THRESHOLD_gamma'] = np.uint8(enhanced_volumes['OG_gamma_volume_og'] > 76) ####1: 115, 2: 87, 4:139, 5: 150, 7:76, 8: 49(queda contorno)
+        enhanced_volumes['DESCARGAR_og_THRESHOLD_gamma'] = np.uint8(enhanced_volumes['OG_gamma_volume_og'] > 28) ####1: 115, 2: 87, 4:139, 5: 150, 6: 28, 7:76, 8: 49(queda contorno)
         enhanced_volumes['OG_sharpened'] = sharpen_high_pass(enhanced_volumes['OG_gamma_volume_og'], strenght=0.8)
-        enhanced_volumes['DESCARGAR_SHARPENED'] = np.uint8(enhanced_volumes['OG_sharpened']>54) ##1:92, 3:134, 4:124, 5> 149, 7:54
+        enhanced_volumes['DESCARGAR_SHARPENED'] = np.uint8(enhanced_volumes['OG_sharpened']>28) ##1:92, 3:134, 4:124, 5> 149, 6:28, 7:54
         ###remove contour
         enhanced_volumes['og_THRESHOLD_gamma_kinda'] = np.uint8(enhanced_volumes['OG_gamma_volume_og'] > 73)
         enhanced_volumes['OG_MORPH_FIRST'] = morph_operations(enhanced_volumes['DESCARGAR_og_THRESHOLD_gamma'], operation= 'open', iterations= 5, kernel_size= 6, kernel_shape= 'square')
         #enhanced_volumes['OG_HU_bones'] = threshold_bone_voxels_slice_by_slice(enhanced_volumes['OG_gamma_volume_og'])
         enhanced_volumes['OG_gauss_volume_og'] = gaussian(enhanced_volumes['og_THRESHOLD_gamma_kinda'], sigma = 0.5) 
         enhanced_volumes['OG_sharpened_volume_og'] = sharpen_high_pass(enhanced_volumes['OG_gauss_volume_og'], strenght = 0.7)
-        enhanced_volumes['og_THRESHOLD_sharpened'] = np.uint8(enhanced_volumes['OG_sharpened_volume_og'] > 0.00262) ###1:0.00262 ,4:149, 5:132, 8: 0.00150
+        enhanced_volumes['DESCARGAR_og_THRESHOLD_sharpened'] = np.uint8(enhanced_volumes['OG_sharpened_volume_og'] > 28) ###1:0.00262 ,4:149, 5:132, 6:28, 8: 0.00150
         enhanced_volumes['OG_WAVELET'] = wavelet_denoise(enhanced_volumes['OG_sharpened_volume_og'], wavelet='db1')
         # enhanced_volumes['OG_LOG'] = log_transform_slices(enhanced_volumes['OG_sharpened_volume_og'], c= 3)
         # enhanced_volumes['OG_FINAL_thresholded_ctp_per_og'] = np.uint8(enhanced_volumes['OG_LOG'] > 63) ### 5:187, 8: 63
@@ -1133,19 +1133,19 @@ def enhance_ctp(inputVolume, inputROI=None, methods = 'all', outputDir=None):
         #### PRUEBA ROI####
         
         enhanced_volumes['PRUEBA_roi_plus_gamma_mask'] =  (final_roi > 0) * enhanced_volumes['OG_gamma_volume_og'] + (final_roi == 0) * 0 #enhanced_volumes['OG_gamma_volume_og']* final_roi
-        enhanced_volumes['DESCARGAR_PRUEBA_roi_plus_gamma_mask'] = np.uint8(enhanced_volumes['PRUEBA_roi_plus_gamma_mask']>77) #1: 119,2:93,3:130, 4:108, 8:58  ### 4: 122, 5:114, 7:77
+        enhanced_volumes['DESCARGAR_PRUEBA_roi_plus_gamma_mask'] = np.uint8(enhanced_volumes['PRUEBA_roi_plus_gamma_mask']>21) #1: 119,2:93,3:130, 4:108, 8:58  ### 4: 122, 5:114, 6: 21, 7:77
         enhanced_volumes['PRUEBA_roi_plus_gamma_mask_clahe'] = apply_clahe(enhanced_volumes['PRUEBA_roi_plus_gamma_mask'])
-        enhanced_volumes['DESCARGAR_PRUEBA_THRESHOLD_CLAHE'] = np.uint8(enhanced_volumes['PRUEBA_roi_plus_gamma_mask_clahe'] > 61) ## 1: 143, 3:149, 4:138,5:142 2: 127, 8:57, 7:61
+        enhanced_volumes['DESCARGAR_PRUEBA_THRESHOLD_CLAHE'] = np.uint8(enhanced_volumes['PRUEBA_roi_plus_gamma_mask_clahe'] > 25) ## 1: 143, 3:149, 4:138,5:142, 6:25 2: 127, 8:57, 7:61
         enhanced_volumes['Prueba_final_roi'] = final_roi
         enhanced_volumes['PRUEBA_WAVELET_NL'] = wavelet_nlm_denoise(enhanced_volumes['PRUEBA_roi_plus_gamma_mask'], wavelet='db1')
-        enhanced_volumes['DESCARGAR_PRUEBA_THRESHOLD_NL_WAVELET'] = np.uint8(enhanced_volumes['PRUEBA_WAVELET_NL']> 54) ## 1: 106, 2:112,3:123, 4.115, 5:117, 8:42, 7:54
+        enhanced_volumes['DESCARGAR_PRUEBA_THRESHOLD_NL_WAVELET'] = np.uint8(enhanced_volumes['PRUEBA_WAVELET_NL']> 37) ## 1: 106, 2:112,3:123, 4.115, 5:117,6:37,  8:42, 7:54
         ########################################
         enhanced_volumes['gaussian_volume_roi'] = gaussian(enhanced_volumes['PRUEBA_roi_plus_gamma_mask'], sigma=0.3)
-        enhanced_volumes['DESCARGAR_PRUEBA_GAUSSIAN_thre'] = np.uint8(enhanced_volumes['gaussian_volume_roi'] > 0.000000061) ### 1: 0.341,2:0.352, 3:0.430, 4: 0.352, 5: 0.525, 8: 0.162, 7: 0.000000061
+        enhanced_volumes['DESCARGAR_PRUEBA_GAUSSIAN_thre'] = np.uint8(enhanced_volumes['gaussian_volume_roi'] > 0.0000000106) ### 1: 0.341,2:0.352, 3:0.430, 4: 0.352, 5: 0.525, 6: 0.0000000106, 8: 0.162, 7: 0.000000061
         enhanced_volumes['PRUEBA_MORPH_OPEN_CONTOUR'] = morph_operations(enhanced_volumes['DESCARGAR_PRUEBA_GAUSSIAN_thre'], operation= 'open')
         enhanced_volumes['sharpened_roi'] = sharpen_high_pass(enhanced_volumes['gaussian_volume_roi'], strenght = 0.5)
         enhanced_volumes['gamma_volume_roi'] = gamma_correction(enhanced_volumes['sharpened_roi'], gamma=2)
-        enhanced_volumes['DESCARGAR_PRUEBA_FINAL_thresholded_ctp_volume_roi'] = np.uint8(enhanced_volumes['gamma_volume_roi'] > 57) # 1: 86, 2:59, 3:62, 4: 80, 5: 101, 8:17, 7:57
+        enhanced_volumes['DESCARGAR_PRUEBA_FINAL_thresholded_ctp_volume_roi'] = np.uint8(enhanced_volumes['gamma_volume_roi'] > 4) # 1: 86, 2:59, 3:62, 4: 80, 5: 101, 6: 4, 8:17, 7:57
         ####################
         # enhanced_volumes['LOG_roi'] = log_transform_slices(enhanced_volumes['gamma_volume_roi'], c=0.5) ### ruido aumenta 
         # enhanced_volumes['Morph_opening'] = morphological_opening_slice_by_slice(enhanced_volumes['gamma_volume_roi'], spacing=(1.0, 1.0), min_dist_mm=1)
@@ -1163,14 +1163,15 @@ def enhance_ctp(inputVolume, inputROI=None, methods = 'all', outputDir=None):
         #######
         # enhanced_volumes['DESCARGAR_Threshold_roi_volume'] = np.uint8(enhanced_volumes['roi_volume']>1646)## 1: 1646, 4: 1526, 5: 2422, 8: 1539
         # enhanced_volumes['DESCARGAR_WAVELET_ROI'] = np.uint8(enhanced_volumes['DESCARGAR_Threshold_roi_volume']>1876) #1: 1876
-        enhanced_volumes['DESCARGAR_GAMMA_ONLY_ROI'] = np.uint8(enhanced_volumes['gamma_only_roi']>171) ##1: 182,2:156,3:190, 4:166, 5:188, 8:163, 7:171
+        enhanced_volumes['DESCARGAR_GAMMA_ONLY_ROI'] = np.uint8(enhanced_volumes['gamma_only_roi']>125) ##1: 182,2:156,3:190, 4:166, 5:188, 6: 125, 8:163, 7:171
        ### Prueba roi_plus gamma después###
         enhanced_volumes['2_gaussian_volume_roi'] = gaussian(enhanced_volumes['PRUEBA_roi_plus_gamma_mask'], sigma=0.3)
+        enhanced_volumes['DESCARGAR_GAUSSIAN_VOLUME_ROI'] = np.uint8(enhanced_volumes['2_gaussian_volume_roi']> 0.0000000089) #6
         ###enhanced_volumes['2_clahe'] = apply_clahe(enhanced_volumes['wavelet_only_roi'])
        
-        enhanced_volumes['2_wavelet_denoised'] = wavelet_denoise(enhanced_volumes['2_gaussian_volume_roi'])
-        enhanced_volumes['2_sharpened_wavelet'] = sharpen_high_pass(enhanced_volumes['2_wavelet_denoised'], strenght=0.7) 
-        enhanced_volumes['DESCARGAR_FINAL_2'] = np.uint8(enhanced_volumes['2_wavelet_denoised'] > 0.000000035) ### 1:0.307, 2: 0.370, 3:0.408, 4: 0.335, 5: 0.372, 8: 0229, 7:0.000000035
+        #enhanced_volumes['2_wavelet_denoised'] = wavelet_denoise(enhanced_volumes['2_gaussian_volume_roi'])
+        #enhanced_volumes['2_sharpened_wavelet'] = sharpen_high_pass(enhanced_volumes['2_wavelet_denoised'], strenght=0.7) 
+        #enhanced_volumes['DESCARGAR_FINAL_2'] = np.uint8(enhanced_volumes['2_wavelet_denoised'] > 0.000000035) ### 1:0.307, 2: 0.370, 3:0.408, 4: 0.335, 5: 0.372, 8: 0229, 7:0.000000035
         #enhanced_volumes['DESCARGAR_SHARPENED_WAVELET'] = np.uint8(enhanced_volumes['2_sharpened_wavelet']>0.401) #1:0.298, 2:0.397, 3:0.415, 4:0.364, 5:0.401, 
 
         enhanced_volumes['2_gamma_correction'] = gamma_correction(enhanced_volumes['2_gaussian_volume_roi'] , gamma = 0.8)
@@ -1178,19 +1179,19 @@ def enhance_ctp(inputVolume, inputROI=None, methods = 'all', outputDir=None):
         kernel_2 = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (1, 1))
         tophat_2 = cv2.morphologyEx(enhanced_volumes['2_gaussian_volume_roi'], cv2.MORPH_TOPHAT, kernel_2)
         enhanced_volumes['2_tophat'] = cv2.addWeighted(enhanced_volumes['2_gaussian_volume_roi'], 1, tophat_2, 2, 0) ### 8:5 
-        enhanced_volumes['DESCARGAR_2_THRESHOLD_tophat'] = np.uint8(enhanced_volumes['2_tophat'] > 0.000000042)  # 1: 0.415, 3:0.515, 4:0.427, 8:0.242, 7: 0.000000042
+        enhanced_volumes['DESCARGAR_2_THRESHOLD_tophat'] = np.uint8(enhanced_volumes['2_tophat'] > 0.0000000158)  # 1: 0.415, 3:0.515, 4:0.427, 8:0.242,6: 0.0000000158,  7: 0.000000042
         enhanced_volumes['2_sharpened'] = sharpen_high_pass(enhanced_volumes['2_gamma_correction'], strenght = 0.8)
-        enhanced_volumes['DESCARGAR_2_THRESHOLD_sharpened'] = np.uint8(enhanced_volumes['2_sharpened'] > 134) ##1: 134, 2:109,3:143, 4:121, 5: 121, 8:91, 7:134
+        enhanced_volumes['DESCARGAR_2_THRESHOLD_sharpened'] = np.uint8(enhanced_volumes['2_sharpened'] > 51) ##1: 134, 2:109,3:143, 4:121, 5: 121, 6: 51, 8:91, 7:134
         # Apply white top-hat transformation
         enhanced_volumes['2_LOG'] = log_transform_slices(enhanced_volumes['2_tophat'], c=3)
-        enhanced_volumes['DESCARGAR_2_FINAL_2_LOG_roi'] = np.uint8(enhanced_volumes['2_LOG'] > 98) ### 1: 97, 2:100, 3:146, 4:106, 5 : 111, 8:91, 7: 78
+        #enhanced_volumes['DESCARGAR_2_FINAL_2_LOG_roi'] = np.uint8(enhanced_volumes['2_LOG'] > 98) ### 1: 97, 2:100, 3:146, 4:106, 5 : 111, 8:91, 7: 78
         enhanced_volumes['2_wavelet_roi'] = wavelet_denoise(enhanced_volumes['2_LOG'], wavelet='db4')
-        enhanced_volumes['DESCARGAR_2_WAVELET'] = np.uint8(enhanced_volumes['2_wavelet_roi']>124) ##1: 125, 2:80, 3:137, 4:130, 5: 160, 7:124
+        #enhanced_volumes['DESCARGAR_2_WAVELET'] = np.uint8(enhanced_volumes['2_wavelet_roi']>124) ##1: 125, 2:80, 3:137, 4:130, 5: 160, 7:124
         enhanced_volumes['2_erode'] = morphological_operation(enhanced_volumes['2_sharpened'], operation='erode', kernel_size=1)
         enhanced_volumes['2_threshold_erode'] = np.uint8(enhanced_volumes['2_erode'] > 106) ##1:150, 2:145, 4:106, 8:93
         enhanced_volumes['2_gaussian_2'] = gaussian(enhanced_volumes['2_erode'], sigma= 0.2)
         enhanced_volumes['2_sharpening_2_trial'] = sharpen_high_pass(enhanced_volumes['2_gaussian_2'], strenght = 0.8)
-        enhanced_volumes['DESCARGAR_2_SHARPENING'] = np.uint8(enhanced_volumes['2_sharpening_2_trial']>0.303) ##1: 0.47, 2:0.47, 3:0.571, 4:0.515, 5: 0.445, 7: 0.303
+        enhanced_volumes['DESCARGAR_2_SHARPENING'] = np.uint8(enhanced_volumes['2_sharpening_2_trial']>0.207) ##1: 0.47, 2:0.47, 3:0.571, 4:0.515, 5: 0.445, 6: 0.207, 7: 0.303
         #enhanced_volumes['2_threshold_gaussian_2'] = np.uint8(enhanced_volumes['2_gaussian_2']>0.018)
         # enhanced_volumes['opening'] = morph_operations(enhanced_volumes['gamma_2'], iterations=2, kernel_shape= 'cross')
         # enhanced_volumes['gamma_3'] = gamma_correction(enhanced_volumes['tophat'], gamma= 2) 
@@ -1201,7 +1202,7 @@ def enhance_ctp(inputVolume, inputROI=None, methods = 'all', outputDir=None):
         ### Prueba otras cosas ###
 
         enhanced_volumes['NUEVO_NLMEANS'] = wavelet_nlm_denoise(enhanced_volumes['roi_volume'])
-        enhanced_volumes['NUEVO_THRESHOLD_NLMEANS'] = np.uint8(enhanced_volumes['NUEVO_NLMEANS']>1368) ###1: 1946,2: 1386, 3:1856, 4:1546,5: 2022,  8:1510; 7: 1368
+        enhanced_volumes['NUEVO_THRESHOLD_NLMEANS'] = np.uint8(enhanced_volumes['NUEVO_NLMEANS']>936) ###1: 1946,2: 1386, 3:1856, 4:1546,5: 2022, 6: 936,  8:1510; 7: 1368
 
 
         # enhanced_volumes['NUEVO_NLMEANS_2'] = wavelet_nlm_denoise(enhanced_volumes['NUEVO_NLMEANS'] )
@@ -1217,19 +1218,19 @@ def enhance_ctp(inputVolume, inputROI=None, methods = 'all', outputDir=None):
        # enhanced_volumes['FINAL_ORGINAL_IDEA_GAUSSIAN_THRESHOLD'] = np.uint8(enhanced_volumes['ORGINAL_IDEA_gaussian'] > 0.055)  ### 8:0.055 (no completo)
         enhanced_volumes['ORGINAL_IDEA_gamma_correction'] = gamma_correction(enhanced_volumes['ORGINAL_IDEA_gaussian'], gamma = 2)
         enhanced_volumes['ORGINAL_IDEA_sharpened'] = sharpen_high_pass(enhanced_volumes['ORGINAL_IDEA_gamma_correction'], strenght = 0.8)
-        enhanced_volumes['DESCARGAR_ORIGINAL_IDEA_SHARPENED_LABEL'] = np.uint8(enhanced_volumes['ORGINAL_IDEA_sharpened'] > 69) ### 1: 70, 2:72, 3:84, 4:46, 5:82 8: 25, 7:69
+        enhanced_volumes['DESCARGAR_ORIGINAL_IDEA_SHARPENED_LABEL'] = np.uint8(enhanced_volumes['ORGINAL_IDEA_sharpened'] > 3) ### 1: 70, 2:72, 3:84, 4:46, 5:82 8: 25, 7:69, 6: 3
         enhanced_volumes['ORIGINAL_IDEA_SHARPENED_OPENING'] = morph_operations(enhanced_volumes['DESCARGAR_ORIGINAL_IDEA_SHARPENED_LABEL'], operation= 'open', kernel_shape= 'cross', kernel_size= 1)
         enhanced_volumes['ORIGINAL_IDEA_wavelet'] = wavelet_denoise(enhanced_volumes['ORGINAL_IDEA_sharpened'])
-        enhanced_volumes['DESCARGAR_ORGINAL_IDEA_FINAL_MASK_LABEL'] = np.uint8(enhanced_volumes['ORIGINAL_IDEA_wavelet']>93) ## 1: 58, 2:71,3:103, 4:48,5:72,  8:18, 7:93
+        enhanced_volumes['DESCARGAR_ORGINAL_IDEA_FINAL_MASK_LABEL'] = np.uint8(enhanced_volumes['ORIGINAL_IDEA_wavelet']>2) ## 1: 58, 2:71,3:103, 4:48,5:72,  8:18, 7:93, 6:2
         enhanced_volumes['ORGINAL_IDEA_gaussian_2'] = gaussian(enhanced_volumes['ORGINAL_IDEA_sharpened'], sigma= 0.4)
         enhanced_volumes['ORGINAL_IDEA_gaussian_2_thershold'] = np.uint8(enhanced_volumes['ORGINAL_IDEA_gaussian_2']>0.318) #1: 0.161, 2:0.193,3:0.318 8:0.057
         enhanced_volumes['ORIGINAL_IDEA_GAMMA_2'] = gamma_correction(enhanced_volumes['ORGINAL_IDEA_gaussian_2'], gamma = 1.4)
-        enhanced_volumes['DESCARGAR_GAMMA_2'] = np.uint8(enhanced_volumes['ORIGINAL_IDEA_GAMMA_2']>39) ##1: 39, 2:56, 3:65,4:26,5:70, 8:8, 7:39
+        enhanced_volumes['DESCARGAR_GAMMA_2'] = np.uint8(enhanced_volumes['ORIGINAL_IDEA_GAMMA_2']>3) ##1: 39, 2:56, 3:65,4:26,5:70,6: 3,  8:8, 7:39
         kernel_size_og = (1, 1) 
         kernel_og = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, kernel_size_og)
         tophat_og = cv2.morphologyEx(enhanced_volumes['ORGINAL_IDEA_gaussian_2'], cv2.MORPH_TOPHAT, kernel_og)
         enhanced_volumes['OG_tophat_1'] = cv2.addWeighted(enhanced_volumes['ORGINAL_IDEA_gaussian_2'], 1, tophat_og, 2, 0)
-        enhanced_volumes['DESCARGAR_OG_TOPHAT_1'] = np.uint8(enhanced_volumes['OG_tophat_1']>0.372) #1: 0.217, 2:0.276 3:0.29, 4:0.128, 5: 0.372
+        enhanced_volumes['DESCARGAR_OG_TOPHAT_1'] = np.uint8(enhanced_volumes['OG_tophat_1']>0.027) #1: 0.217, 2:0.276 3:0.29, 4:0.128, 5: 0.372, 6: 0.027
         #enhanced_volumes['OG_GAUSSIAN_TOPHAT'] = gaussian(enhanced_volumes['OG_tophat_1'], sigma= 0.9)
         
         #enhanced_volumes['OG_RESTA'] = enhanced_volumes['OG_tophat_1'] - gaussian(roi_volume, sigma= 0.8)
@@ -1246,7 +1247,7 @@ def enhance_ctp(inputVolume, inputROI=None, methods = 'all', outputDir=None):
         tophat_ft = cv2.morphologyEx(roi_volume, cv2.MORPH_TOPHAT, kernel)
         enhanced_volumes['FT_tophat_1'] = cv2.addWeighted(roi_volume, 1, tophat_ft, 2, 0)
         enhanced_volumes['FT_RESTA_TOPHAT_GAUSSIAN'] = enhanced_volumes['FT_tophat_1'] - gaussian(roi_volume, sigma= 0.8)
-        enhanced_volumes['DESCARGAR_FT_RESTA_TOPHAT_GAUSSIAN'] = np.uint(enhanced_volumes['FT_RESTA_TOPHAT_GAUSSIAN'] >396)  #1:594,2:929,3:1178,4:493,5:1103,  8:378, 7: 396
+        enhanced_volumes['DESCARGAR_FT_RESTA_TOPHAT_GAUSSIAN'] = np.uint(enhanced_volumes['FT_RESTA_TOPHAT_GAUSSIAN'] >129)  #1:594,2:929,3:1178,4:493,5:1103,  8:378, 7: 396,6: 129
         enhanced_volumes['FT_gamma_correction'] = gamma_correction(enhanced_volumes['FT_gaussian'], gamma = 5)
         #enhanced_volumes['FINAL_FT_gamma_THRESHOLD'] = np.uint8(enhanced_volumes['FT_gamma_correction'] > 24) 
         enhanced_volumes['FT_sharpened'] = sharpen_high_pass(enhanced_volumes['FT_gamma_correction'], strenght = 0.4)
@@ -1254,23 +1255,40 @@ def enhance_ctp(inputVolume, inputROI=None, methods = 'all', outputDir=None):
         enhanced_volumes['FT_gaussian_2'] = gaussian(enhanced_volumes['FT_sharpened'], sigma= 0.4)
         enhanced_volumes['FT_gaussinan_threshold'] = np.uint8(enhanced_volumes['FT_gaussian_2'] > 0.275) #1:0.205, 2:0.257, 3:0.275, 8:0.155
         enhanced_volumes['FT_gamma_2'] = gamma_correction(enhanced_volumes['FT_gaussian_2'], gamma= 1.2)
-        enhanced_volumes['DESCARGAR_FT_GAMMA_2'] = np.uint8(enhanced_volumes['FT_gamma_2']>40) #1: 32, 2:47, 3:72,4:16,5: 86,  8:15, 7:40
+        enhanced_volumes['DESCARGAR_FT_GAMMA_2'] = np.uint8(enhanced_volumes['FT_gamma_2']>4) #1: 32, 2:47, 3:72,4:16,5: 86,  8:15, 7:40,6 :4
         enhanced_volumes['FT_opening'] = morph_operations(enhanced_volumes['FT_gamma_2'], iterations=2, kernel_shape= 'cross')
         enhanced_volumes['FT_closing'] = morph_operations(enhanced_volumes['FT_opening'], operation= 'close')
         #enhanced_volumes['wo_large_objects'] = remove_large_objects(enhanced_volumes['closing'], size_threshold= 9000)
         enhanced_volumes['FT_erode_2'] = morphological_operation(enhanced_volumes['FT_closing'], operation='erode', kernel_size=1)
-        enhanced_volumes['DESCARGAR_FT_ERODE_2'] = np.uint8(enhanced_volumes['FT_erode_2']>35) #1:35, 2:42,3:68,4:10,5: 85,  8:18, 7: 35
+        enhanced_volumes['DESCARGAR_FT_ERODE_2'] = np.uint8(enhanced_volumes['FT_erode_2']>6) #1:35, 2:42,3:68,4:10,5: 85,  8:18, 7: 35, 6: 6
         # Create an elliptical structuring element (adjust size if needed)
         kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (1, 1))
         # Apply white top-hat transformation
         tophat = cv2.morphologyEx(enhanced_volumes['FT_gaussian_2'], cv2.MORPH_TOPHAT, kernel)
         enhanced_volumes['FT_tophat'] = cv2.addWeighted(enhanced_volumes['FT_gaussian_2'], 1, tophat, 2, 0)
-        enhanced_volumes['DESCARGAR_FT_THRESHOLD_TOPHAT'] = np.uint8(enhanced_volumes['FT_tophat'] > 0.170) #1: 0.145, 3:0.313, 4:0.068, 5: 0.396 , 8:0.090; 7: 0.170
+        enhanced_volumes['DESCARGAR_FT_THRESHOLD_TOPHAT'] = np.uint8(enhanced_volumes['FT_tophat'] > 0.034) #1: 0.145, 3:0.313, 4:0.068, 5: 0.396 ,6: 0.034,  8:0.090; 7: 0.170
         #################
         enhanced_volumes['FT_gaussian_3'] = gaussian(enhanced_volumes['FT_tophat'], sigma= 0.1)
-        enhanced_volumes['DESCARGAR_FT_THRESHOLD_GAMMA_3'] = np.uint8(enhanced_volumes['FT_gaussian_3'] > 0.313) ##1: 0.123, 2:0.179, 3:0.305,4:0.064,5: 0.363, 8:0.101, 7: 0.313
+        enhanced_volumes['DESCARGAR_FT_THRESHOLD_GAMMA_3'] = np.uint8(enhanced_volumes['FT_gaussian_3'] > 0.034) ##1: 0.123, 2:0.179, 3:0.305,4:0.064,5: 0.363,6:0.034,  8:0.101, 7: 0.313
         ##################
 
+        ####8-MASK_50###
+        enhanced_volumes['50_PRUEBA_roi_plus_gamma_mask'] = enhanced_volumes['PRUEBA_roi_plus_gamma_mask']
+        enhanced_volumes['50_DESCARGAR_PRUEBA_roi_plus_gamma_mask'] = np.uint8(enhanced_volumes['PRUEBA_roi_plus_gamma_mask']>62)
+        enhanced_volumes['50_PRUEBA_PRUEBA_WAVELET_NL'] = enhanced_volumes['PRUEBA_WAVELET_NL']
+        enhanced_volumes['50_DESCARGAR_PRUEBA_WAVELET_NL'] =np.uint8(enhanced_volumes['PRUEBA_WAVELET_NL']>66)
+        enhanced_volumes['50_gaussian_volume_roi']= enhanced_volumes['gaussian_volume_roi']
+        enhanced_volumes['50_DESCARGAR_gaussian_volume_roi'] =np.uint8(enhanced_volumes['gaussian_volume_roi']>0.000000019)
+        enhanced_volumes['50_sharpened_roi'] = enhanced_volumes['sharpened_roi']
+        enhanced_volumes['50_DESCARGAR_sharpened_roi'] = np.uint8(enhanced_volumes['sharpened_roi']>0.000000020)
+        enhanced_volumes['50_2_wavelet_roi']= enhanced_volumes['2_wavelet_roi']
+        enhanced_volumes['50_DESCARGAR_2_wavelet_roi'] = np.uint8(enhanced_volumes['2_wavelet_roi']>62)
+        enhanced_volumes['50_FT_RESTA_TOPHAT_GAUSSIAN']= enhanced_volumes['FT_RESTA_TOPHAT_GAUSSIAN'] 
+        enhanced_volumes['50_DESCARGAR_FT_RESTA_TOPHAT_GAUSSIAN'] = np.uint8(enhanced_volumes['FT_RESTA_TOPHAT_GAUSSIAN'] >339)
+        enhanced_volumes['50_FT_tophat'] = enhanced_volumes['FT_tophat']
+        enhanced_volumes['50_DESCARGAR_FT_tophat'] = np.uint8(enhanced_volumes['FT_tophat'] >0.089)
+
+    
 
 
 
@@ -1304,7 +1322,7 @@ def enhance_ctp(inputVolume, inputROI=None, methods = 'all', outputDir=None):
         enhancedVolumeNodes[method_name] = enhancedVolumeNode
         
         # Save the volume as NRRD
-        output_file = os.path.join(outputDir, f"Filtered_th_20_{method_name}_{inputVolume.GetName()}.nrrd")
+        output_file = os.path.join(outputDir, f"Filtered_th_50_{method_name}_{inputVolume.GetName()}.nrrd")
         slicer.util.saveNode(enhancedVolumeNode, output_file)
         print(f"Saved {method_name} enhancement as: {output_file}")
     
@@ -1365,93 +1383,8 @@ def add_more_filter(inputVolume, selected_filters=None, outputDir=None):
     return enhancedVolumeNode
       
 ####################
-
-def label_and_get_centroids(mask, spacing):
-    """
-    Label a binary mask and extract centroids, volumes, and bounding box sizes for each region.
-
-    Args:
-        mask (ndarray): Binary mask (2D or 3D).
-        spacing (tuple): Voxel spacing in mm (x, y, z).
-
-    Returns:
-        pd.DataFrame: DataFrame containing region properties.
-    """
-    # Label the mask
-    labeled_mask = label(mask)
-    regions = regionprops(labeled_mask)
-
-    region_data = []
-
-    for region in regions:
-        label = region.label
-        centroid = region.centroid
-        # Ensure coordinates are 3D, even if only 2D
-        z_coord = centroid[2] if len(centroid) > 2 else 0  # Default to 0 for 2D masks
-
-        # Calculate the physical volume (in mm³) based on the voxel spacing
-        region_volume_voxels = region.area
-        region_volume_mm3 = region_volume_voxels * (spacing[0] * spacing[1] * spacing[2])
-
-        # Get the bounding box dimensions in voxel units
-        minr, minc, minz, maxr, maxc, maxz = region.bbox
-        x_size_voxels = maxc - minc
-        y_size_voxels = maxr - minr
-        z_size_voxels = maxz - minz if len(centroid) > 2 else 1  # Default to 1 for 2D masks
-
-        # Convert bounding box dimensions from voxels to mm
-        x_size_mm = x_size_voxels * spacing[0]
-        y_size_mm = y_size_voxels * spacing[1]
-        z_size_mm = z_size_voxels * spacing[2]
-
-        # Intensity statistics (optional)
-        intensity_mean = np.mean(mask[labeled_mask == label])
-        intensity_variance = np.var(mask[labeled_mask == label])
-
-        # Store data in a dictionary format
-        region_data.append({
-            'Label': label,
-            'Centroid_X': centroid[0],
-            'Centroid_Y': centroid[1],
-            'Centroid_Z': z_coord,
-            'Volume_Voxels': region_volume_voxels,
-            'Volume_mm3': region_volume_mm3,
-            'X_Size_Voxels': x_size_voxels,
-            'Y_Size_Voxels': y_size_voxels,
-            'Z_Size_Voxels': z_size_voxels,
-            'X_Size_mm': x_size_mm,
-            'Y_Size_mm': y_size_mm,
-            'Z_Size_mm': z_size_mm,
-            'Intensity_Mean': intensity_mean,
-            'Intensity_Variance': intensity_variance
-        })
-    
-    # Create a DataFrame to store the data
-    df = pd.DataFrame(region_data)
-    
-    return df
-
-def save_centroids_to_csv(mask, file_path, inputVolume, enhancedVolumeNode):
-
-    if mask is None or inputVolume is None:
-        raise ValueError("Mask and input volume must be provided.")
-
-    spacing = inputVolume.GetSpacing()
-
-    df = label_and_get_centroids(mask, spacing)
-
-    enhancedVolumeNode.SetOrigin(inputVolume.GetOrigin())
-    enhancedVolumeNode.SetSpacing(inputVolume.GetSpacing())
-
-    ijkToRasMatrix = vtk.vtkMatrix4x4()
-    inputVolume.GetIJKToRASMatrix(ijkToRasMatrix)
-    enhancedVolumeNode.SetIJKToRASMatrix(ijkToRasMatrix)
-
-    df.to_csv(file_path, index=False)
-    print(f"Data saved to {file_path}")
-
 inputVolume = slicer.util.getNode('CTp.3D')  
-inputROI = slicer.util.getNode('patient6_resampled_sy_mask_2')  # Brain Mask 
+inputROI = slicer.util.getNode('patient8_mask_7')  # Brain Mask 
 # # # # # Define the file path to save the CSV
 # # # file_path = r'C:\\Users\\rocia\\Downloads\\TFG\\Cohort\\Enhance_ctp_tests\\P5\\P5_centroids_and_coordinates.csv'
 
@@ -1467,7 +1400,7 @@ inputROI = slicer.util.getNode('patient6_resampled_sy_mask_2')  # Brain Mask
 
 
 # # # # # # # Output directory
-outputDir = r'C:\\Users\\rocia\\Downloads\\TFG\\Cohort\\Enhance_ctp_tests\\P6'  
+outputDir = r'C:\\Users\\rocia\\Downloads\\TFG\\Cohort\\Enhance_ctp_tests\\P8\\TH50'  
 
 # # # # # # # # # # # Test the function 
 enhancedVolumeNodes = enhance_ctp(inputVolume, inputROI, methods='all', outputDir=outputDir)
