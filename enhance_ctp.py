@@ -639,9 +639,7 @@ def wavelet_nlm_denoise(roi_volume,
     return denoised_volume
 
 def wavelet_denoise(slice_image, wavelet='db1', level=1):
-    """Applies wavelet denoising to a single slice."""
     coeffs = pywt.wavedec2(slice_image, wavelet, level=level)
-    # Threshold the high-frequency coefficients
     coeffs_thresholded = list(coeffs)
     coeffs_thresholded[1:] = [tuple([pywt.threshold(c, value=0.2, mode='soft') for c in coeffs_level]) for coeffs_level in coeffs[1:]]
     denoised_slice = pywt.waverec2(coeffs_thresholded, wavelet)
@@ -652,22 +650,9 @@ def wavelet_denoise(slice_image, wavelet='db1', level=1):
 #################################
 
 def remove_large_objects(segmented_image, size_threshold):
-    """
-    Removes large objects from a labeled image.
 
-    Parameters:
-        segmented_image (numpy.ndarray): 3D image with labeled connected components (after watershed).
-        size_threshold (int): Minimum size (in number of voxels) for an object to be kept.
-
-    Returns:
-        numpy.ndarray: Modified image with large objects removed.
-    """
-    
     labeled_image = measure.label(segmented_image, connectivity=1)  
-  
     mask = np.zeros_like(segmented_image, dtype=bool)
-    
- 
     for region in measure.regionprops(labeled_image):
         # If the region is small enough, keep it
         if region.area <= size_threshold:
@@ -678,26 +663,12 @@ def remove_large_objects(segmented_image, size_threshold):
     return filtered_image
 
 def denoise_2d_slices(volume, patch_size=2, patch_distance=2, h=0.1):
-    """
-    Denoise a 3D volume slice by slice using Non-Local Means Denoising.
 
-    Parameters:
-    - volume: 3D numpy array (CT/MRI volume)
-    - patch_size: The size of the patches used for comparison (default is 5)
-    - patch_distance: The maximum distance between patches to compare (default is 6)
-    - h: Filtering parameter (higher values result in more smoothing)
-
-    Returns:
-    - Denoised 3D volume
-    """
-    # Initialize an empty array to hold the denoised volume
     denoised_volume = np.zeros_like(volume)
-
     for i in range(volume.shape[0]):  
         slice_image = volume[i]  
         denoised_slice = denoise_nl_means(slice_image, patch_size=patch_size, patch_distance=patch_distance, h=h)
         denoised_volume[i] = denoised_slice  
-
     return denoised_volume
 
 
@@ -713,55 +684,33 @@ def update_vtk_volume_from_numpy(np_array, vtk_image_node):
     slicer.app.processEvents()
 
 def generate_contour_mask(brain_mask, dilation_iterations=1):
-
     if not isinstance(brain_mask, np.ndarray):
         brain_mask = slicer.util.arrayFromVolume(brain_mask)
-    
-    # Ensure brain_mask is binary (0 and 255)
     brain_mask = np.uint8(brain_mask > 0) * 255
-    
-    # Create structuring element
     kernel = np.ones((3, 3), np.uint8)
-    # Dilate the brain mask
     dilated_mask = cv2.dilate(brain_mask, kernel, iterations=dilation_iterations)
-
     contour_mask = cv2.subtract(dilated_mask, brain_mask)
-    
     return contour_mask
 
 
 def get_watershed_markers(binary):
     binary = np.uint8(binary > 0) * 255  # Convert to binary mask
-
-    # Compute distance transform
     distance = distance_transform_edt(binary)
-
-    # ✅ Smooth distance transform to reduce noise
     smoothed_distance = gaussian_filter(distance, sigma=1)
-
-    # Apply Otsu threshold on smoothed distance map
     otsu_threshold = filters.threshold_otsu(smoothed_distance)
-    markers = measure.label(smoothed_distance > otsu_threshold)  # Label regions
-
+    markers = measure.label(smoothed_distance > otsu_threshold)  
     return markers
 
 def apply_watershed_on_volume(volume_array):
     print(f"apply_watershed_on_volume - Input volume shape: {volume_array.shape}")
-    
-    # Initialize final watershed segmented volume
     watershed_segmented = np.zeros_like(volume_array, dtype=np.uint8)
 
     for i in range(volume_array.shape[0]):  # Iterate over slices
         binary_slice = np.uint8(volume_array[i] > 0) * 255  # Convert to binary
         marker_slice = get_watershed_markers(binary_slice)
-
-        # Use distance transform instead of binary slice for better segmentation
         distance = distance_transform_edt(binary_slice)
         segmented_slice = segmentation.watershed(-distance, marker_slice, mask=binary_slice)
-
-        # Remove tiny objects to reduce noise
         cleaned_segmented_slice = remove_small_objects(segmented_slice, min_size=10)
-
         watershed_segmented[i] = cleaned_segmented_slice
 
     print(f"Watershed segmentation - Final result shape: {watershed_segmented.shape}, Dtype: {watershed_segmented.dtype}")
@@ -779,8 +728,6 @@ def apply_dbscan_2d(volume_array, eps=5, min_samples=10):
         print(f"Processing Slice {slice_idx} for DBSCAN...")
         
         slice_data = volume_array[slice_idx]
-
-        # Extract nonzero points
         yx_coords = np.column_stack(np.where(slice_data > 0))
         print(f"Slice {slice_idx} - Non-zero points: {len(yx_coords)}")
 
@@ -793,12 +740,10 @@ def apply_dbscan_2d(volume_array, eps=5, min_samples=10):
         dbscan = DBSCAN(eps=eps, min_samples=min_samples)
         labels = dbscan.fit_predict(yx_coords)
 
-        # Convert labels back to 2D
         clustered_slice = np.zeros_like(slice_data, dtype=np.int32)
         for i, (y, x) in enumerate(yx_coords):
-            clustered_slice[y, x] = labels[i] + 1  # Shift labels to be non-negative
+            clustered_slice[y, x] = labels[i] + 1  
 
-        # Store results
         clustered_volume[slice_idx] = clustered_slice
         cluster_counts[slice_idx] = len(set(labels)) - (1 if -1 in labels else 0)  # Exclude noise
 
@@ -817,8 +762,6 @@ def separate_merged_electrodes_mm(mask, spacing):
     - separated_mask: 3D numpy array with segmented electrodes.
     """
     separated_mask = np.zeros_like(mask, dtype=np.int32)
-    
-    # Compute area in mm² per voxel (y_spacing * x_spacing)
     voxel_area_mm2 = spacing[1] * spacing[2]
     
     for i in range(mask.shape[0]):  
@@ -826,12 +769,9 @@ def separate_merged_electrodes_mm(mask, spacing):
             continue  
 
         distance = distance_transform_edt(mask[i]) * np.sqrt(voxel_area_mm2)
-
         footprint_size = max(1, int(2 / np.sqrt(voxel_area_mm2)))  
         local_maxi = peak_local_max(distance, footprint=np.ones((footprint_size, footprint_size)), labels=mask[i])
-
         markers, _ = label(local_maxi)
-
         separated_mask[i] = watershed(-distance, markers, mask=mask[i])
     
     return separated_mask
@@ -839,29 +779,19 @@ def separate_merged_electrodes_mm(mask, spacing):
 def apply_gmm(image, n_components=3):
    
     pixel_values = image[image > 0].reshape(-1, 1)  
-
     if pixel_values.shape[0] == 0:
         return np.zeros_like(image)  
-
-    # Check for unique intensity values
     unique_values = np.unique(pixel_values)
     print(f"Unique intensity values count: {len(unique_values)}")
-
     if len(unique_values) < n_components:
         print("⚠️ Not enough unique intensity values for GMM clustering!")
         return np.zeros_like(image)  # Return blank mask
-
     try:
-        # Dynamically adjust the number of clusters
         n_clusters = min(n_components, len(unique_values))
         gmm = GaussianMixture(n_components=n_clusters)
         gmm_labels = gmm.fit_predict(pixel_values) 
-
         gmm_image = np.zeros_like(image)
-
-        # Get indices where image > 0
         indices = np.where(image > 0)
-
         gmm_image[indices] = gmm_labels + 1  
 
     except Exception as e:
@@ -872,24 +802,16 @@ def apply_gmm(image, n_components=3):
 def apply_snakes_tiny(volume):
 
     final_contours = np.zeros_like(volume, dtype=np.uint8)
-
-  
     for i in range(volume.shape[0]): 
         slice_2d = volume[i] 
-  
         edges = feature.canny(slice_2d)  
-  
         s = np.zeros(slice_2d.shape)
         center = (slice_2d.shape[0] // 2, slice_2d.shape[1] // 2)
-   
         rr, cc = draw.ellipse(center[0], center[1], 20, 20)
         s[rr, cc] = 1  # Create an initial contour
-    
         snake = active_contour(edges, s, alpha=0.015, beta=10, gamma=0.001, max_num_iter=250)
-
         contour_mask = np.zeros_like(slice_2d)
         contour_mask[tuple(snake.T.astype(int))] = 1  
-   
         final_contours[i] = contour_mask
     
     return final_contours
@@ -1055,27 +977,16 @@ def enhance_ctp(inputVolume, inputROI=None, methods = 'all', outputDir=None):
         # Convert the ROI to a binary mask
         roi_array = slicer.util.arrayFromVolume(inputROI)
         roi_array = np.uint8(roi_array > 0)  # Ensure binary mask (0 or 1)
-        
-        # Print shapes for debugging
         print(f"Shape of input volume: {volume_array.shape}")
         print(f"Shape of ROI mask: {roi_array.shape}")
-
-        # Perform any morphological operations if needed
         print("Filling inside the ROI...")
         filled_roi = ndimage.binary_fill_holes(roi_array)
-        
         print("Applying morphological closing...")
         struct_elem = morphology.ball(10)
         closed_roi = morphology.binary_closing(filled_roi, struct_elem)
-        
-        # The final ROI after morphological operations
         final_roi = closed_roi
-        
-        # Ensure that final_roi and volume_array have the same shape
-        # Ensure that final_roi and volume_array have the same shape
         if closed_roi.shape != volume_array.shape:
             print("🔄 Shapes don't match. Using spacing/origin-aware resampling...")
-                
             final_roi = closed_roi
             
         else:
@@ -1088,11 +999,10 @@ def enhance_ctp(inputVolume, inputROI=None, methods = 'all', outputDir=None):
     print(f'Volume shape: {volume_array.shape}, ROI shape: {final_roi.shape}')
     print(f'Volume dtype: {volume_array.dtype}, ROI dtype: {final_roi.dtype}')
     
-    # Apply mask with explicit element-wise multiplication
     
     roi_volume = np.multiply(volume_array, final_roi)
     final_roi = final_roi.astype(np.uint8)
-    # Apply selected enhancement methods
+
 
     enhanced_volumes = {}
     if methods == 'all':
@@ -1100,11 +1010,10 @@ def enhance_ctp(inputVolume, inputROI=None, methods = 'all', outputDir=None):
         ### Only CTP ###
         enhanced_volumes['OG_volume_array'] = volume_array
         print(f"OG_volume_array shape: {enhanced_volumes['OG_volume_array'].shape}")
+        enhanced_volumes['DESCARGAR_OG_volume_array'] = np.uint8(enhanced_volumes['OG_volume_array']>1896) #8:1896
         #enhanced_volumes['denoise_ctp'] = denoise_2d_slices(enhanced_volumes['gaussian_volume_og'], patch_size=2, patch_distance=2, h=0.8)
         enhanced_volumes['OG_gaussian_volume_og'] = gaussian(enhanced_volumes['OG_volume_array'], sigma=0.3)
-        #enhanced_volumes['OG_theshold_bones_electrodes'] = threshold_bone_voxels_slice_by_slice(enhanced_volumes['OG_gaussian_volume_og'])
-        #CLAHE
-        ###enhanced_volumes['OG_CLAHE_VOLUME_OG'] = apply_clahe(enhanced_volumes['OG_volume_array'])
+        enhanced_volumes['DESCARGAR_OG_gaussian_volume_og'] = np.uint8(enhanced_volumes['OG_gaussian_volume_og']>1716) #8:1716
         enhanced_volumes['OG_gamma_volume_og'] = gamma_correction(enhanced_volumes['OG_gaussian_volume_og'] , gamma=3)
         enhanced_volumes['DESCARGAR_og_THRESHOLD_gamma'] = np.uint8(enhanced_volumes['OG_gamma_volume_og'] > 28) ####1: 115, 2: 87, 4:139, 5: 150, 6: 28, 7:76, 8: 49(queda contorno)
         enhanced_volumes['OG_sharpened'] = sharpen_high_pass(enhanced_volumes['OG_gamma_volume_og'], strenght=0.8)
@@ -1272,27 +1181,8 @@ def enhance_ctp(inputVolume, inputROI=None, methods = 'all', outputDir=None):
         enhanced_volumes['DESCARGAR_FT_THRESHOLD_GAMMA_3'] = np.uint8(enhanced_volumes['FT_gaussian_3'] > 0.034) ##1: 0.123, 2:0.179, 3:0.305,4:0.064,5: 0.363,6:0.034,  8:0.101, 7: 0.313
         ##################
 
-        ####8-MASK_50###
-        enhanced_volumes['50_PRUEBA_roi_plus_gamma_mask'] = enhanced_volumes['PRUEBA_roi_plus_gamma_mask']
-        enhanced_volumes['50_DESCARGAR_PRUEBA_roi_plus_gamma_mask'] = np.uint8(enhanced_volumes['PRUEBA_roi_plus_gamma_mask']>62)
-        enhanced_volumes['50_PRUEBA_PRUEBA_WAVELET_NL'] = enhanced_volumes['PRUEBA_WAVELET_NL']
-        enhanced_volumes['50_DESCARGAR_PRUEBA_WAVELET_NL'] =np.uint8(enhanced_volumes['PRUEBA_WAVELET_NL']>66)
-        enhanced_volumes['50_gaussian_volume_roi']= enhanced_volumes['gaussian_volume_roi']
-        enhanced_volumes['50_DESCARGAR_gaussian_volume_roi'] =np.uint8(enhanced_volumes['gaussian_volume_roi']>0.000000019)
-        enhanced_volumes['50_sharpened_roi'] = enhanced_volumes['sharpened_roi']
-        enhanced_volumes['50_DESCARGAR_sharpened_roi'] = np.uint8(enhanced_volumes['sharpened_roi']>0.000000020)
-        enhanced_volumes['50_2_wavelet_roi']= enhanced_volumes['2_wavelet_roi']
-        enhanced_volumes['50_DESCARGAR_2_wavelet_roi'] = np.uint8(enhanced_volumes['2_wavelet_roi']>62)
-        enhanced_volumes['50_FT_RESTA_TOPHAT_GAUSSIAN']= enhanced_volumes['FT_RESTA_TOPHAT_GAUSSIAN'] 
-        enhanced_volumes['50_DESCARGAR_FT_RESTA_TOPHAT_GAUSSIAN'] = np.uint8(enhanced_volumes['FT_RESTA_TOPHAT_GAUSSIAN'] >339)
-        enhanced_volumes['50_FT_tophat'] = enhanced_volumes['FT_tophat']
-        enhanced_volumes['50_DESCARGAR_FT_tophat'] = np.uint8(enhanced_volumes['FT_tophat'] >0.089)
-
-    
 
 
-
-    # Set output directory 
     if outputDir is None:
         outputDir = slicer.app.temporaryPath()  
     
@@ -1302,27 +1192,16 @@ def enhance_ctp(inputVolume, inputROI=None, methods = 'all', outputDir=None):
     # Process each enhanced volume
     enhancedVolumeNodes = {}
     for method_name, enhanced_image in enhanced_volumes.items():
-        # Create a new volume node to store the enhanced image data
         enhancedVolumeNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLScalarVolumeNode")
         enhancedVolumeNode.SetName(f"Enhanced_th20_{method_name}_{inputVolume.GetName()}")
-
-        # Copy the original volume's transformation information to the enhanced volume
         enhancedVolumeNode.SetOrigin(inputVolume.GetOrigin())
         enhancedVolumeNode.SetSpacing(inputVolume.GetSpacing())
-
-        # Get and set the IJK to RAS transformation matrix
         ijkToRasMatrix = vtk.vtkMatrix4x4()
         inputVolume.GetIJKToRASMatrix(ijkToRasMatrix)  
         enhancedVolumeNode.SetIJKToRASMatrix(ijkToRasMatrix) 
-
-        # Update the volume node with the enhanced image data
         slicer.util.updateVolumeFromArray(enhancedVolumeNode, enhanced_image)
-      
-        # Store the volume node in the results for later access
         enhancedVolumeNodes[method_name] = enhancedVolumeNode
-        
-        # Save the volume as NRRD
-        output_file = os.path.join(outputDir, f"Filtered_th_50_{method_name}_{inputVolume.GetName()}.nrrd")
+        output_file = os.path.join(outputDir, f"Filtered_th_35_{method_name}_{inputVolume.GetName()}.nrrd")
         slicer.util.saveNode(enhancedVolumeNode, output_file)
         print(f"Saved {method_name} enhancement as: {output_file}")
     
@@ -1333,19 +1212,13 @@ def enhance_ctp(inputVolume, inputROI=None, methods = 'all', outputDir=None):
 ################################################
 
 def add_more_filter(inputVolume, selected_filters=None, outputDir=None):
-    # Default selected_filters to an empty list if None is provided
+
     if selected_filters is None:
         selected_filters = []
-
-    # Convert input volume to numpy array
     volume_array = slicer.util.arrayFromVolume(inputVolume)
-
-    # Ensure the volume is valid
     if volume_array is None or volume_array.size == 0:
         slicer.util.errorDisplay("Input volume data is empty or invalid.")
         return None
-
-    # Apply filters based on the selected options
     if 'morph_operations' in selected_filters:
         print("Applying morphological operations...")
         volume_array = morph_operations(volume_array)
@@ -1358,33 +1231,24 @@ def add_more_filter(inputVolume, selected_filters=None, outputDir=None):
         print("Applying high pass sharpening...")
         volume_array = sharpen_high_pass(volume_array)
 
-    # Create the enhanced volume node
     enhancedVolumeNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLScalarVolumeNode")
     enhancedVolumeNode.SetName(f"Enhanced_{inputVolume.GetName()}")
-
-    # Copy the original volume's transformation information to the enhanced volume
     enhancedVolumeNode.SetOrigin(inputVolume.GetOrigin())
     enhancedVolumeNode.SetSpacing(inputVolume.GetSpacing())
-
-    # Get and set the IJK to RAS transformation matrix
     ijkToRasMatrix = vtk.vtkMatrix4x4()
     inputVolume.GetIJKToRASMatrix(ijkToRasMatrix)
     enhancedVolumeNode.SetIJKToRASMatrix(ijkToRasMatrix)
-
-  
     slicer.util.updateVolumeFromArray(enhancedVolumeNode, volume_array)
   
     if outputDir:
         output_file = os.path.join(outputDir, f"Enhanced_more_filters_{inputVolume.GetName()}.nrrd")
         slicer.util.saveNode(enhancedVolumeNode, output_file)
         print(f"Saved enhanced volume with filters as: {output_file}")
-
-    # Return the enhanced volume node
     return enhancedVolumeNode
       
 ####################
-inputVolume = slicer.util.getNode('CTp.3D')  
-inputROI = slicer.util.getNode('patient8_mask_7')  # Brain Mask 
+# inputVolume = slicer.util.getNode('CTp.3D')  
+# inputROI = slicer.util.getNode('patient7_resampled_sy_mask')  # Brain Mask 
 # # # # # Define the file path to save the CSV
 # # # file_path = r'C:\\Users\\rocia\\Downloads\\TFG\\Cohort\\Enhance_ctp_tests\\P5\\P5_centroids_and_coordinates.csv'
 
@@ -1400,7 +1264,7 @@ inputROI = slicer.util.getNode('patient8_mask_7')  # Brain Mask
 
 
 # # # # # # # Output directory
-outputDir = r'C:\\Users\\rocia\\Downloads\\TFG\\Cohort\\Enhance_ctp_tests\\P8\\TH50'  
+outputDir = r'C:\\Users\\rocia\\Downloads\\TFG\\Cohort\\Enhance_ctp_tests\\P7\\TH35'  
 
 # # # # # # # # # # # Test the function 
 enhancedVolumeNodes = enhance_ctp(inputVolume, inputROI, methods='all', outputDir=outputDir)

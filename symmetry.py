@@ -7,7 +7,7 @@ def create_symmetric_mask(mask_name, axis='x', output_mask_name="Fully_Connected
     try:
         input_mask = slicer.util.getNode(mask_name)
         if not input_mask:
-            raise ValueError("❌ Error: Could not find the input mask in the scene.")
+            raise ValueError("Error: Could not find the input mask in the scene.")
 
         mask_array = slicer.util.arrayFromVolume(input_mask)
 
@@ -22,7 +22,7 @@ def create_symmetric_mask(mask_name, axis='x', output_mask_name="Fully_Connected
 
         axis_map = {'x': 2, 'y': 1, 'z': 0}
         if axis not in axis_map:
-            raise ValueError("❌ Error: Axis must be 'x', 'y', or 'z'.")
+            raise ValueError("Error: Axis must be 'x', 'y', or 'z'.")
         axis_index = axis_map[axis]
 
         flipped_mask = np.flip(mask_array, axis=axis_index)
@@ -44,12 +44,12 @@ def create_symmetric_mask(mask_name, axis='x', output_mask_name="Fully_Connected
 
         if output_path:
             slicer.util.saveNode(output_mask, output_path)
-            print(f"✅ Fully connected symmetric mask saved to {output_path}")
+            print(f"Fully connected symmetric mask saved to {output_path}")
 
-        print(f"✅ Fully connected symmetric mask created: '{output_mask_name}'")
+        print(f"Fully connected symmetric mask created: '{output_mask_name}'")
 
     except Exception as e:
-        print(f"❌ Error: {e}")
+        print(f"Error: {e}")
 
 create_symmetric_mask("patient7_mask_2", axis='x', output_mask_name="patient7_symmetric_mask", output_path= r'C:\\Users\\rocia\\Downloads\\TFG\\Cohort\\Enhance_ctp_tests\\patient7_symmetry_mask.nrrd')
 
