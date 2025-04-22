@@ -23,6 +23,7 @@ def get_array_from_volume(volume_node):
 def binarize_array(array, threshold=0):
     return (array > threshold).astype(np.uint8) if array is not None else None
 
+
 def calculate_centroids_numpy(electrodes_array):
     if electrodes_array is None:
         return pd.DataFrame(columns=['label', 'centroid-0', 'centroid-1', 'centroid-2'])

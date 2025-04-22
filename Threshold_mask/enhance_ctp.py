@@ -60,99 +60,11 @@ logging.basicConfig(level=logging.DEBUG)
 ##################################
 
 
-# Define enhancement methods
-
-def threshold_metal_voxels_slice_by_slice(image_array, percentile=99.5):
-    """Threshold metal voxels slice by slice."""
-    print(f"DEBUG: Input array shape: {image_array.shape}, dtype: {image_array.dtype}") 
-    if image_array.ndim != 3:
-        raise ValueError("Input must be a 3D array.")
-
-    mask = np.zeros_like(image_array, dtype=np.uint8)
-    print(f"DEBUG: Initialized mask shape: {mask.shape}, dtype: {mask.dtype}") 
-    for i in range(image_array.shape[2]):  
-        print(f"DEBUG: Processing slice {i}")
-        slice_data = image_array[:, :, i]
-        print(f"DEBUG: Slice {i} shape: {slice_data.shape}, dtype: {slice_data.dtype}") 
-
-        if not np.isfinite(slice_data).all():
-            print(f"DEBUG: Slice {i} contains NaN or Inf values. Replacing with zeros.")
-            slice_data = np.nan_to_num(slice_data)
-            print(f"DEBUG: Slice {i} after NaN/Inf removal, dtype: {slice_data.dtype}") 
-
-        threshold_value = np.nanpercentile(slice_data, percentile)
-        print(f"DEBUG: Slice {i} threshold value: {threshold_value}") 
-
-        binary_slice = (slice_data > threshold_value)
-        print(f"DEBUG: Slice {i} binary slice shape: {binary_slice.shape}, dtype: {binary_slice.dtype}") 
-        
-        mask[:, :, i] = binary_slice.astype(np.uint8)
-        print(f"DEBUG: Slice {i} mask slice shape: {mask[:,:,i].shape}, dtype: {mask[:,:,i].dtype}") 
-
-    print(f"DEBUG: Final mask shape: {mask.shape}, dtype: {mask.dtype}") 
-    print(f"DEBUG: unique values in mask: {np.unique(mask)}") 
-    return mask
-
-
-def threshold_bone_voxels_slice_by_slice(image_array, lower_HU=300, upper_HU=3000):
-    """
-    Thresholds bone voxels based on Hounsfield Units slice by slice.
-    Emphasizes bone structures by creating a mask where bone-like structures are highlighted.
-    
-    Parameters:
-    - image_array (3D array): The input CT volume.
-    - lower_HU (int): Lower bound for bone Hounsfield Units (typically >300 HU for bone).
-    - upper_HU (int): Upper bound for bone Hounsfield Units (e.g., ~3000 HU).
-    
-    Returns:
-    - mask (3D array): A binary mask highlighting the bone regions.
-    """
-    print(f"DEBUG: Input array shape: {image_array.shape}, dtype: {image_array.dtype}") 
-    
-    # Ensure input is a 3D array
-    if image_array.ndim != 3:
-        raise ValueError("Input must be a 3D array.")
-
-    mask = np.zeros_like(image_array, dtype=np.uint8)
-    print(f"DEBUG: Initialized mask shape: {mask.shape}, dtype: {mask.dtype}") 
-
-    # Iterate through each slice of the 3D image
-    for i in range(image_array.shape[2]):
-        print(f"DEBUG: Processing slice {i}")
-        
-        # Extract the slice
-        slice_data = image_array[:, :, i]
-        print(f"DEBUG: Slice {i} shape: {slice_data.shape}, dtype: {slice_data.dtype}") 
-
-        # Check for NaN or Inf values and handle them
-        if not np.isfinite(slice_data).all():
-            print(f"DEBUG: Slice {i} contains NaN or Inf values. Replacing with zeros.")
-            slice_data = np.nan_to_num(slice_data)
-            print(f"DEBUG: Slice {i} after NaN/Inf removal, dtype: {slice_data.dtype}") 
-
-        # Threshold based on HU values for bones (300+ HU for bone)
-        bone_mask = (slice_data >= lower_HU) & (slice_data <= upper_HU)
-        print(f"DEBUG: Slice {i} bone mask created with lower HU: {lower_HU}, upper HU: {upper_HU}.")
-        
-        # Update the overall mask
-        mask[:, :, i] = bone_mask.astype(np.uint8)
-        print(f"DEBUG: Slice {i} mask slice shape: {mask[:,:,i].shape}, dtype: {mask[:,:,i].dtype}") 
-
-    print(f"DEBUG: Final mask shape: {mask.shape}, dtype: {mask.dtype}") 
-    print(f"DEBUG: Unique values in mask: {np.unique(mask)}") 
-
-    return mask
-
 def apply_median_filter_2d(image_array, kernel_size_mm2=0.5, spacing=(1.0, 1.0)):
-
     kernel_radius_pixels = int(round(np.sqrt(kernel_size_mm2 / np.pi) / min(spacing[:2])))
-    
     selem = disk(kernel_radius_pixels)
-
     filtered_slices = np.array([median(slice_, selem) for slice_ in image_array])
-
     print(f"✅ 2D Median filtering complete. Kernel radius: {kernel_radius_pixels} pixels")
-    
     return filtered_slices
 
 def apply_median_filter(image_array, kernel_size=3):
@@ -190,7 +102,6 @@ def gamma_correction(roi_volume, gamma=1.8):
         return np.uint8(np.clip(gamma_corrected * 255, 0, 255))
 
 def adaptive_gamma_correction(volume, gamma=1.8):
-    # Analyze the image histogram to adjust gamma dynamically
     volume_min = np.min(volume)
     volume_max = np.max(volume)
     gamma_adjusted = (volume_max - volume_min) / 255  
@@ -212,22 +123,7 @@ def local_threshold(roi_volume):
         return binary_local_uint8
     
 def denoise_2d_slices(volume, patch_size=5, patch_distance=6, h=0.1):
-    """
-    Denoise a 3D volume slice by slice using Non-Local Means Denoising.
-
-    Parameters:
-    - volume: 3D numpy array (CT/MRI volume)
-    - patch_size: The size of the patches used for comparison (default is 5)
-    - patch_distance: The maximum distance between patches to compare (default is 6)
-    - h: Filtering parameter (higher values result in more smoothing)
-
-    Returns:
-    - Denoised 3D volume
-    """
-    # Initialize an empty array to hold the denoised volume
     denoised_volume = np.zeros_like(volume)
-
-    # Apply Non-Local Means Denoising to each slice
     for i in range(volume.shape[0]): 
         slice_image = volume[i]  
         denoised_slice = denoise_nl_means(slice_image, patch_size=patch_size, patch_distance=patch_distance, h=h, multichannel=False)
@@ -244,9 +140,7 @@ def anisotropic_diffusion(roi_volume, n_iter=1, k=50, gamma=0.1):
 
     
 def bilateral_filter(roi_volume, d=3, sigma_color=75, sigma_space=40):
-        # Convert roi_volume to uint8 (if not already) and ensure values are in the range 0-255
         roi_volume_uint8 = np.uint8(np.clip(roi_volume, 0, 255))
-
         filtered_slices = np.zeros_like(roi_volume_uint8)
         for i in range(roi_volume_uint8.shape[0]):
             filtered_slices[i] = cv2.bilateralFilter(roi_volume_uint8[i], d, sigma_color, sigma_space)
@@ -258,21 +152,8 @@ def unsharp_masking(image, weight=1.5, blur_radius=1):
     return sharpened
 
 def remove_large_objects_grayscale(image, size_threshold=5000):
-    """
-    Removes large objects from a grayscale image without binarization.
-    
-    Parameters:
-        image (numpy.ndarray): The original grayscale image.
-        size_threshold (int): The maximum object size to keep.
-    
-    Returns:
-        numpy.ndarray: Image with large structures removed.
-    """
-    # Ensure input is a NumPy array
     image = np.asarray(image, dtype=np.float32)
-
     binary_mask = image > np.percentile(image, 60)
-
     labeled = label(binary_mask, connectivity=1)  
     for region in regionprops(labeled):
         if region.area > size_threshold:
@@ -285,7 +166,6 @@ def wavelet_denoise(roi_volume, wavelet='db1', level=1):
         for i in range(roi_volume.shape[0]):
             slice_image = roi_volume[i]
             coeffs = pywt.wavedec2(slice_image, wavelet, level=level)
-            # Threshold the high-frequency coefficients
             coeffs_thresholded = list(coeffs)
             coeffs_thresholded[1:] = [tuple([pywt.threshold(c, value=0.2, mode='soft') for c in coeffs_level]) for coeffs_level in coeffs[1:]]
             denoised_slices[i] = pywt.waverec2(coeffs_thresholded, wavelet)
@@ -301,154 +181,55 @@ def sharpen_high_pass(roi_volume, kernel_size = 1, strenght=0.5):
         return sharpened_slices
 
 def sharpen_fourier(roi_volume, radius=30, strength=0.5):
-    """
-    Apply high-pass filtering in the Fourier domain to enhance edges in a 3D volume.
-    
-    Parameters:
-    - roi_volume: 3D numpy array (depth, height, width)
-    - radius: Radius for the high-pass filter (higher = more detail preserved)
-    - strength: Scaling factor for the high-frequency components
-
-    Returns:
-    - 3D numpy array with enhanced slices
-    """
     sharpened_slices = np.zeros_like(roi_volume, dtype=np.float32)
-
-    for i in range(roi_volume.shape[0]):  # Loop through each slice
+    for i in range(roi_volume.shape[0]):  
         slice_image = roi_volume[i]
-
-        # Apply Fourier Transform
         f = np.fft.fft2(slice_image)
         fshift = np.fft.fftshift(f)
-
-        # Create High-Pass Filter (HPF)
         rows, cols = slice_image.shape
         crow, ccol = rows // 2 , cols // 2
         mask = np.ones((rows, cols), np.uint8)
-        mask[crow-radius:crow+radius, ccol-radius:ccol+radius] = 0  # Blocking low frequencies
-
-        # Apply High-Pass Filter in Frequency Domain
+        mask[crow-radius:crow+radius, ccol-radius:ccol+radius] = 0  
         fshift_filtered = fshift * mask
         f_ishift = np.fft.ifftshift(fshift_filtered)
         img_back = np.fft.ifft2(f_ishift)
         img_back = np.abs(img_back)
-
-        # Sharpening: Adding a scaled version of the high-pass result to the original
         sharpened_slice = np.clip(slice_image + strength * img_back, 0, 255)
-
         sharpened_slices[i] = sharpened_slice
-
     return sharpened_slices.astype(np.uint8)
     
 def laplacian_sharpen(roi_volume, strength=1.5, iterations=3):
-    """
-    Apply Laplacian edge detection and sharpen the image while keeping the background black.
-    
-    Parameters:
-    - roi_volume: 3D numpy array (CT/MRI volume)
-    - strength: Intensity of sharpening
-    - iterations: Number of iterations to apply sharpening
-    
-    Returns:
-    - Sharpened 3D volume with preserved black background
-    """
     sharpened_slices = np.zeros_like(roi_volume)
-
     for i in range(roi_volume.shape[0]):
         slice_image = roi_volume[i]
-
-        # Convert to float32 for processing
         slice_image_float = slice_image.astype(np.float32)
-
         for _ in range(iterations):
             laplacian = cv2.Laplacian(slice_image_float, cv2.CV_32F)
-
             laplacian = np.clip(laplacian, -255, 255)  
-
             slice_image_float = np.clip(slice_image_float - strength * laplacian, 0, 255)
-
         slice_image_float[slice_image == 0] = 0
-
         sharpened_slices[i] = np.clip(slice_image_float, 0, 255).astype(np.uint8)
-
     return sharpened_slices
 
 
 def adaptive_binarization(roi_volume, block_size=11, C=2, edge_strength=0.5):
-        """
-        Adaptive binarization with edge enhancement.
-        """
         binarized_slices = np.zeros_like(roi_volume)
-
         for i in range(roi_volume.shape[0]):
             slice_image = roi_volume[i]
-            
-            # Apply adaptive threshold
             binarized = cv2.adaptiveThreshold(slice_image, 255, cv2.ADAPTIVE_THRESH_MEAN_C, cv2.THRESH_BINARY, block_size, C)
-            
-            # Detect edges (Canny)
             edges = cv2.Canny(slice_image, 50, 150)
-
-            # Blend edges with binarized image
             combined = cv2.addWeighted(binarized, 1 - edge_strength, edges, edge_strength, 0)
-
             binarized_slices[i] = combined
-
         return binarized_slices
 
-def adaptive_threshold_high_pass_with_equalization(roi_volume, block_size=5, C=5, strength=0.5):
-        """
-        Apply histogram equalization, adaptive thresholding, and mild high-pass filtering 
-        to sharpen the edges in a 3D volume.
-
-        Parameters:
-        - roi_volume: 3D numpy array (CT/MRI volume)
-        - block_size: Size of the neighborhood for adaptive thresholding (must be odd)
-        - C: Constant subtracted from the mean to fine-tune thresholding
-        - strength: Mild sharpening strength to apply to the high-pass filter
-
-        Returns:
-        - Sharpened, equalized, and thresholded 3D volume
-        """
-        equalized_slices = np.zeros_like(roi_volume)
-
-        for i in range(roi_volume.shape[0]):
-            slice_image = roi_volume[i]
-            
-            # Apply histogram equalization to improve contrast
-            equalized_image = cv2.equalizeHist(np.uint8(slice_image))  # Ensure the image is uint8
-            
-            # Apply adaptive threshold to the equalized slice
-            thresholded_image = cv2.adaptiveThreshold(
-                equalized_image, 
-                255, 
-                cv2.ADAPTIVE_THRESH_MEAN_C, 
-                cv2.THRESH_BINARY, 
-                block_size, 
-                C
-            )
-
-            # Apply mild high-pass filter to sharpen the edges
-            blurred = cv2.GaussianBlur(thresholded_image, (3, 3), 0)  # Using a slightly larger kernel for gentler blur
-            high_pass = thresholded_image - blurred  # High-pass component
-            sharpened_slice = np.clip(thresholded_image + strength * high_pass, 0, 255)  # Subtle sharpening
-            
-            equalized_slices[i] = sharpened_slice
-
-        return equalized_slices
 def morphological_operation(image, operation='dilate', kernel_size=3, iterations=1):
-
     kernel = np.ones((kernel_size, kernel_size), np.uint8)
-    
     if operation == 'dilate':
      processed_image = cv2.dilate(image, kernel, iterations=iterations)
-    
     elif operation == 'erode':
         processed_image = cv2.erode(image, kernel, iterations=iterations)
-   
     else:
         raise ValueError("Invalid operation. Use 'dilate' or 'erode'.")
-    
     return processed_image
 
 def morph_operations(roi_volume, kernel_size=1, operation="open", iterations=1, kernel_shape="square"):
@@ -473,128 +254,54 @@ def morph_operations(roi_volume, kernel_size=1, operation="open", iterations=1, 
     return processed_slices
 
 def apply_frangi_slice_by_slice(volume):
-    """
-    Applies the Frangi vesselness filter to a 3D volume slice-by-slice.
-    
-    Parameters:
-        volume (numpy.ndarray): The 3D input image volume.
-
-    Returns:
-        numpy.ndarray: The enhanced 3D volume with Frangi applied per slice.
-    """
-    # Initialize an empty array with the same shape as input
     enhanced_volume = np.zeros_like(volume, dtype=np.float32)
-
-    # Apply Frangi filter slice-by-slice along the Z-axis
     for i in range(volume.shape[0]):  
         enhanced_volume[i] = frangi(volume[i], scale_range=(1, 5), scale_step=2)
-
     return enhanced_volume   
     
 def contrast_stretching(roi_volume, lower_percentile=2, upper_percentile=98):
-        """
-        Apply contrast stretching to enhance the image without over-amplifying noise.
-
-        Parameters:
-        - roi_volume: 3D numpy array (CT/MRI volume)
-        - lower_percentile: Lower bound for intensity scaling (default 2%)
-        - upper_percentile: Upper bound for intensity scaling (default 98%)
-
-        Returns:
-        - Contrast-enhanced 3D volume
-        """
         stretched_slices = np.zeros_like(roi_volume, dtype=np.uint8)
-
         for i in range(roi_volume.shape[0]):
             slice_image = roi_volume[i]
-
-            # Get intensity range based on percentiles
             p_low, p_high = np.percentile(slice_image, (lower_percentile, upper_percentile))
-
-            # Apply contrast stretching
             stretched_slices[i] = exposure.rescale_intensity(slice_image, in_range=(p_low, p_high), out_range=(0, 255)).astype(np.uint8)
 
         return stretched_slices
         
 def canny_edges(roi_volume, sigma=1.0, low_threshold=50, high_threshold=150):
-        """
-        Apply Canny edge detection to each slice in the volume with optional Gaussian blur.
-
-        Parameters:
-        - roi_volume: 3D numpy array (CT/MRI volume)
-        - sigma: Standard deviation for Gaussian blur (affects edge detection)
-        - low_threshold: Lower bound for edges
-        - high_threshold: Upper bound for edges
-        
-        Returns:
-        - Edge-detected 3D volume
-        """
         edge_slices = np.zeros_like(roi_volume)
-
         for i in range(roi_volume.shape[0]):
             slice_image = roi_volume[i]
-
-            # Apply Gaussian blur with sigma to smooth the image before edge detection
             blurred_image = cv2.GaussianBlur(slice_image, (5, 5), sigma)
-
-            # Apply Canny edge detection after the blur
             edge_slices[i] = cv2.Canny(blurred_image, low_threshold, high_threshold)
-
         return edge_slices
-def log_transform_slices(roi_volume, c=5, sigma=0.4):
-    """
-    Apply log transformation slice by slice, enhance small bright structures.
-    
-    Args:
-        roi_volume (numpy array): 3D volume data (Z, Y, X)
-        c (float): Scaling factor for log transformation
-        sigma (float): Gaussian blur factor to preserve small structures
-    
-    Returns:
-        numpy array: Processed volume with enhanced electrode brightness
-    """
-    roi_volume_log = np.zeros_like(roi_volume, dtype=np.float32) 
 
+def log_transform_slices(roi_volume, c=5, sigma=0.4):
+    roi_volume_log = np.zeros_like(roi_volume, dtype=np.float32) 
     for i in range(roi_volume.shape[0]):  
         slice_data = roi_volume[i].astype(np.float32)  
         slice_data_smoothed = gaussian_filter(slice_data, sigma=sigma)  
         slice_data_log = c * np.log1p(slice_data_smoothed)  
-
-        # Enhance electrode edges
         slice_data_edges = laplace(slice_data_log)  
         slice_data_enhanced = slice_data_log + 0.5 * slice_data_edges  
-
-        # Normalize slice to 0-255
         slice_data_enhanced = np.clip(slice_data_enhanced / np.max(slice_data_enhanced) * 255, 0, 255)
-
         roi_volume_log[i] = slice_data_enhanced  
-    
     return roi_volume_log.astype(np.uint8)
 
 def preprocess_image(image):
-    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)  # Convert to grayscale
-    _, binary = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)  # Binarization
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)  
+    _, binary = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU) 
     return binary
 
 def sobel_edge_detection(roi_volume):
     sobel_slices = np.zeros_like(roi_volume)
-
     for i in range(roi_volume.shape[0]):
         slice_image = roi_volume[i]
-
-        # Apply Sobel edge detection in both x and y directions
         sobel_x = cv2.Sobel(slice_image, cv2.CV_64F, 1, 0, ksize=3)
         sobel_y = cv2.Sobel(slice_image, cv2.CV_64F, 0, 1, ksize=3)
-
-        # Compute the magnitude of the gradients (combined edges in both directions)
         sobel_magnitude = cv2.magnitude(sobel_x, sobel_y)
-
-        # Convert back to 8-bit image
         sobel_edge_detected = np.uint8(np.clip(sobel_magnitude, 0, 255))
-
-        # Store the processed slice
         sobel_slices[i] = sobel_edge_detected
-
     return sobel_slices
 
 def wavelet_nlm_denoise(roi_volume,
@@ -603,37 +310,16 @@ def wavelet_nlm_denoise(roi_volume,
                          patch_size=3,
                          patch_distance=5,
                          weight=0.05):
-    """
-    Applies Wavelet and Non-Local Means denoising slice by slice.
 
-    Args:
-        roi_volume (numpy.ndarray): Input 3D volume.
-        wavelet (str): Wavelet type.
-        level (int): Wavelet decomposition level.
-        patch_size (int): Patch size for NLM.
-        patch_distance (int): Patch distance for NLM.
-        weight (float): Weight parameter for NLM.
-
-    Returns:
-        numpy.ndarray: Denoised 3D volume.
-    """
-    # Initialize the denoised volume
     denoised_volume = np.zeros_like(roi_volume)
-
-    # Slice-by-slice processing
     for z in range(roi_volume.shape[0]):
         slice_2d = roi_volume[z, :, :]
 
-        # 1. Wavelet Denoising
         wavelet_denoised_slice = wavelet_denoise(slice_2d, wavelet=wavelet, level=level)
-
-        # 2. Non-Local Means Denoising
         nlm_denoised_slice = restoration.denoise_nl_means(wavelet_denoised_slice,
                                                             patch_size=patch_size,
                                                             patch_distance=patch_distance,
                                                             h=weight * wavelet_denoised_slice.std())
-
-        # Store the denoised slice to the volume
         denoised_volume[z, :, :] = nlm_denoised_slice
 
     return denoised_volume
@@ -650,20 +336,16 @@ def wavelet_denoise(slice_image, wavelet='db1', level=1):
 #################################
 
 def remove_large_objects(segmented_image, size_threshold):
-
     labeled_image = measure.label(segmented_image, connectivity=1)  
     mask = np.zeros_like(segmented_image, dtype=bool)
     for region in measure.regionprops(labeled_image):
         # If the region is small enough, keep it
         if region.area <= size_threshold:
             mask[labeled_image == region.label] = True
-
     filtered_image = segmented_image * mask
-    
     return filtered_image
 
 def denoise_2d_slices(volume, patch_size=2, patch_distance=2, h=0.1):
-
     denoised_volume = np.zeros_like(volume)
     for i in range(volume.shape[0]):  
         slice_image = volume[i]  
@@ -671,15 +353,11 @@ def denoise_2d_slices(volume, patch_size=2, patch_distance=2, h=0.1):
         denoised_volume[i] = denoised_slice  
     return denoised_volume
 
-
 def vtk_to_numpy(vtk_image_node):
-    """Convert vtkMRMLScalarVolumeNode to numpy array."""
     np_array = slicer.util.arrayFromVolume(vtk_image_node)
-    
     return np_array
 
 def update_vtk_volume_from_numpy(np_array, vtk_image_node):
-    """Update vtkMRMLScalarVolumeNode from a NumPy array."""
     slicer.util.updateVolumeFromArray(vtk_image_node, np_array)  
     slicer.app.processEvents()
 
@@ -692,9 +370,8 @@ def generate_contour_mask(brain_mask, dilation_iterations=1):
     contour_mask = cv2.subtract(dilated_mask, brain_mask)
     return contour_mask
 
-
 def get_watershed_markers(binary):
-    binary = np.uint8(binary > 0) * 255  # Convert to binary mask
+    binary = np.uint8(binary > 0) * 255  
     distance = distance_transform_edt(binary)
     smoothed_distance = gaussian_filter(distance, sigma=1)
     otsu_threshold = filters.threshold_otsu(smoothed_distance)
@@ -704,80 +381,51 @@ def get_watershed_markers(binary):
 def apply_watershed_on_volume(volume_array):
     print(f"apply_watershed_on_volume - Input volume shape: {volume_array.shape}")
     watershed_segmented = np.zeros_like(volume_array, dtype=np.uint8)
-
-    for i in range(volume_array.shape[0]):  # Iterate over slices
-        binary_slice = np.uint8(volume_array[i] > 0) * 255  # Convert to binary
+    for i in range(volume_array.shape[0]):  
+        binary_slice = np.uint8(volume_array[i] > 0) * 255  
         marker_slice = get_watershed_markers(binary_slice)
         distance = distance_transform_edt(binary_slice)
         segmented_slice = segmentation.watershed(-distance, marker_slice, mask=binary_slice)
         cleaned_segmented_slice = remove_small_objects(segmented_slice, min_size=10)
         watershed_segmented[i] = cleaned_segmented_slice
-
     print(f"Watershed segmentation - Final result shape: {watershed_segmented.shape}, Dtype: {watershed_segmented.dtype}")
     return watershed_segmented
 
-
-# Function to apply DBSCAN clustering on 2D slices
 def apply_dbscan_2d(volume_array, eps=5, min_samples=10):
-    print(f"apply_dbscan_2d - Input volume shape: {volume_array.shape}")
-    
-    clustered_volume = np.zeros_like(volume_array, dtype=np.int32)  # Store cluster labels
+    clustered_volume = np.zeros_like(volume_array, dtype=np.int32) 
     cluster_counts = {}
-
     for slice_idx in range(volume_array.shape[0]):
         print(f"Processing Slice {slice_idx} for DBSCAN...")
-        
         slice_data = volume_array[slice_idx]
         yx_coords = np.column_stack(np.where(slice_data > 0))
         print(f"Slice {slice_idx} - Non-zero points: {len(yx_coords)}")
-
         if len(yx_coords) == 0:
             print(f"Slice {slice_idx} - No non-zero points, skipping...")
-            continue  # Skip empty slices
-
-        # Apply DBSCAN
+            continue  
         print(f"Applying DBSCAN on Slice {slice_idx}...")
         dbscan = DBSCAN(eps=eps, min_samples=min_samples)
         labels = dbscan.fit_predict(yx_coords)
-
         clustered_slice = np.zeros_like(slice_data, dtype=np.int32)
         for i, (y, x) in enumerate(yx_coords):
             clustered_slice[y, x] = labels[i] + 1  
-
         clustered_volume[slice_idx] = clustered_slice
-        cluster_counts[slice_idx] = len(set(labels)) - (1 if -1 in labels else 0)  # Exclude noise
-
-    print(f"DBSCAN - Cluster counts per slice: {cluster_counts}")
+        cluster_counts[slice_idx] = len(set(labels)) - (1 if -1 in labels else 0)  
     return clustered_volume, cluster_counts
 
 def separate_merged_electrodes_mm(mask, spacing):
-    """
-    Uses distance transform + watershed to separate merged electrodes with mm² scaling.
-
-    Parameters:
-    - mask: 3D binary numpy array (1 = electrode, 0 = background)
-    - spacing: Tuple (z_spacing, y_spacing, x_spacing) in mm
-
-    Returns:
-    - separated_mask: 3D numpy array with segmented electrodes.
-    """
     separated_mask = np.zeros_like(mask, dtype=np.int32)
     voxel_area_mm2 = spacing[1] * spacing[2]
-    
     for i in range(mask.shape[0]):  
         if np.sum(mask[i]) == 0:
             continue  
-
         distance = distance_transform_edt(mask[i]) * np.sqrt(voxel_area_mm2)
         footprint_size = max(1, int(2 / np.sqrt(voxel_area_mm2)))  
         local_maxi = peak_local_max(distance, footprint=np.ones((footprint_size, footprint_size)), labels=mask[i])
         markers, _ = label(local_maxi)
         separated_mask[i] = watershed(-distance, markers, mask=mask[i])
-    
     return separated_mask
 
 def apply_gmm(image, n_components=3):
-   
     pixel_values = image[image > 0].reshape(-1, 1)  
     if pixel_values.shape[0] == 0:
         return np.zeros_like(image)  
@@ -785,7 +433,7 @@ def apply_gmm(image, n_components=3):
     print(f"Unique intensity values count: {len(unique_values)}")
     if len(unique_values) < n_components:
         print("⚠️ Not enough unique intensity values for GMM clustering!")
-        return np.zeros_like(image)  # Return blank mask
+        return np.zeros_like(image) 
     try:
         n_clusters = min(n_components, len(unique_values))
         gmm = GaussianMixture(n_components=n_clusters)
@@ -793,14 +441,12 @@ def apply_gmm(image, n_components=3):
         gmm_image = np.zeros_like(image)
         indices = np.where(image > 0)
         gmm_image[indices] = gmm_labels + 1  
-
     except Exception as e:
         print(f"⚠️ GMM error: {e}")
         return np.zeros_like(image)  
 
     return gmm_image
 def apply_snakes_tiny(volume):
-
     final_contours = np.zeros_like(volume, dtype=np.uint8)
     for i in range(volume.shape[0]): 
         slice_2d = volume[i] 
@@ -813,26 +459,16 @@ def apply_snakes_tiny(volume):
         contour_mask = np.zeros_like(slice_2d)
         contour_mask[tuple(snake.T.astype(int))] = 1  
         final_contours[i] = contour_mask
-    
     return final_contours
 
-
 def get_auto_seeds(binary):
-
-    # Compute distance transform
     distance = distance_transform_edt(binary)
-
-    # Detect local maxima (potential seeds)
     local_max = peak_local_max(distance, min_distance=1, labels=binary)
-
-    # Label detected seeds
     seeds, num_seeds = label(local_max)
-
     print(f"Generated {num_seeds} automatic seeds.")
     return seeds
 
 def refine_labels(labels, min_size=5):
-
     refined = np.zeros_like(labels)
     for region in regionprops(labels):
         if region.area >= min_size:  
@@ -841,123 +477,74 @@ def refine_labels(labels, min_size=5):
 
 def region_growing(binary, tolerance=3, min_size=5):
     seeds = get_auto_seeds(binary)
-
     segmented = np.zeros_like(binary, dtype=np.uint8)
-
     for label_id in range(1, seeds.max() + 1):
         mask = seeds == label_id
         region = binary.copy()
-
         region_grown = (distance_transform_edt(mask) < tolerance) & binary
-
         segmented[region_grown] = label_id  
-
     segmented = refine_labels(segmented, min_size)
-
     return segmented
-
 
 
 def separate_by_erosion_and_closing(mask, kernel_size_mm2=0.5, spacing=(1.0, 1.0), erosion_iterations=1, closing_iterations=1):
     mask = np.uint8(mask > 0) 
-
     kernel_radius_pixels_x = int(round(np.sqrt(kernel_size_mm2 / np.pi) / spacing[0]))
     kernel_radius_pixels_y = int(round(np.sqrt(kernel_size_mm2 / np.pi) / spacing[1]))
-
     kernel_size_pixels = (max(3, kernel_radius_pixels_x * 2 + 1), 
                           max(3, kernel_radius_pixels_y * 2 + 1))
-
     kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, kernel_size_pixels)
-
     eroded_mask = cv2.erode(mask, kernel, iterations=erosion_iterations)
-
     closed_mask = cv2.morphologyEx(eroded_mask, cv2.MORPH_CLOSE, kernel, iterations=closing_iterations)
-
     print(f"✅ Erosion and closing applied with kernel size {kernel_size_pixels} pixels")
-    
     return closed_mask
 
 def morphological_opening_slice_by_slice(mask, spacing, min_dist_mm=2.0):
-    """
-    Apply 2D morphological opening slice by slice for a 3D mask.
-    """
-    
     kernel_size = int(min_dist_mm / spacing[0])  
-
     kernel = disk(kernel_size)  
-
     opened_mask = np.zeros_like(mask)
-
     for i in range(mask.shape[0]):
         slice_image = mask[i]
-        
         opened_slice = ndimage.binary_opening(slice_image, structure=kernel).astype(np.uint8)
-        
         opened_mask[i] = opened_slice
-    
     return opened_mask
 
 def separate_merged_2d(mask, electrode_radius=0.4, voxel_size=(1, 1, 1), distance_threshold=1):
-
     mask = (mask > 0).astype(np.uint8)
-
     distance = distance_transform_edt(mask)
-
     thresholded_distance = distance > distance_threshold  
-
     labeled_mask, num_features = label(thresholded_distance)
-
     separated_mask = np.zeros_like(mask)
     for i in range(1, num_features + 1):
         separated_mask[labeled_mask == i] = 1  
-
     return separated_mask
 
 
 def enhance_electrode_brightness_slice_by_slice(image, method='clahe', clip_limit=0.03, kernel_size=5):
-    """
-    Enhances the brightness of electrodes in the center of the image slice by slice.
-
-    Args:
-        image (numpy.ndarray): Input 3D image.
-        method (str): Enhancement method ('clahe', 'tophat', 'log', 'unsharp', 'intensity_scaling').
-        clip_limit (float): Clip limit for CLAHE.
-        kernel_size (int): Kernel size for morphological operations (Tophat) and LoG filtering.
-
-    Returns:
-        numpy.ndarray: Enhanced 3D image.
-    """
     enhanced_image = np.zeros_like(image)
-    
     for i in range(image.shape[0]):
         slice_image = image[i, :, :]
-
         if method == 'clahe':
             clahe = exposure.CLAHE(clip_limit=clip_limit)
             enhanced_slice = clahe.apply(slice_image)
-        
         elif method == 'tophat':
             selem = morphology.disk(kernel_size)
             enhanced_slice = morphology.white_tophat(slice_image, selem)
-        
         elif method == 'log':
             enhanced_slice = filters.laplace(ndimage.gaussian_filter(slice_image, kernel_size))
-            
         elif method == 'unsharp':
             gaussian_blurred = ndimage.gaussian_filter(slice_image, kernel_size)
             enhanced_slice = slice_image + 1.0 * (slice_image - gaussian_blurred)
-        
         elif method == 'intensity_scaling':
             I_min = np.min(slice_image)
             I_max = np.max(slice_image)
             enhanced_slice = (slice_image - I_min)/(I_max - I_min)
-
         else:
             raise ValueError("Invalid enhancement method")
-        
         enhanced_image[i, :, :] = enhanced_slice
-    
     return enhanced_image
+
+
 
 ###########################################    
 # Function to enhance the CTP.3D images ###
@@ -965,16 +552,12 @@ def enhance_electrode_brightness_slice_by_slice(image, method='clahe', clip_limi
 
 def enhance_ctp(inputVolume, inputROI=None, methods = 'all', outputDir=None):
     methods ='all'
-    # Convert input volume to numpy array
     volume_array = slicer.util.arrayFromVolume(inputVolume)
-
     if volume_array is None or volume_array.size == 0:
         print("Input volume data is empty or invalid.")
         return None
 
-    # If inputROI is provided
     if inputROI is not None:
-        # Convert the ROI to a binary mask
         roi_array = slicer.util.arrayFromVolume(inputROI)
         roi_array = np.uint8(roi_array > 0)  # Ensure binary mask (0 or 1)
         print(f"Shape of input volume: {volume_array.shape}")
@@ -988,7 +571,6 @@ def enhance_ctp(inputVolume, inputROI=None, methods = 'all', outputDir=None):
         if closed_roi.shape != volume_array.shape:
             print("🔄 Shapes don't match. Using spacing/origin-aware resampling...")
             final_roi = closed_roi
-            
         else:
             final_roi = closed_roi
             print("No resizing needed: ROI already has the same shape as volume.")
@@ -998,11 +580,8 @@ def enhance_ctp(inputVolume, inputROI=None, methods = 'all', outputDir=None):
     # Apply the ROI mask to the volume
     print(f'Volume shape: {volume_array.shape}, ROI shape: {final_roi.shape}')
     print(f'Volume dtype: {volume_array.dtype}, ROI dtype: {final_roi.dtype}')
-    
-    
     roi_volume = np.multiply(volume_array, final_roi)
     final_roi = final_roi.astype(np.uint8)
-
 
     enhanced_volumes = {}
     if methods == 'all':
@@ -1010,26 +589,14 @@ def enhance_ctp(inputVolume, inputROI=None, methods = 'all', outputDir=None):
         ### Only CTP ###
         enhanced_volumes['OG_volume_array'] = volume_array
         print(f"OG_volume_array shape: {enhanced_volumes['OG_volume_array'].shape}")
-        enhanced_volumes['DESCARGAR_OG_volume_array'] = np.uint8(enhanced_volumes['OG_volume_array']>1896) #8:1896
+        enhanced_volumes['DESCARGAR_OG_volume_array_2296'] = np.uint8(enhanced_volumes['OG_volume_array']>2296) #2: 2296
         #enhanced_volumes['denoise_ctp'] = denoise_2d_slices(enhanced_volumes['gaussian_volume_og'], patch_size=2, patch_distance=2, h=0.8)
         enhanced_volumes['OG_gaussian_volume_og'] = gaussian(enhanced_volumes['OG_volume_array'], sigma=0.3)
-        enhanced_volumes['DESCARGAR_OG_gaussian_volume_og'] = np.uint8(enhanced_volumes['OG_gaussian_volume_og']>1716) #8:1716
+        #enhanced_volumes['DESCARGAR_OG_gaussian_volume_og'] = np.uint8(enhanced_volumes['OG_gaussian_volume_og']>1716) #8:1716
         enhanced_volumes['OG_gamma_volume_og'] = gamma_correction(enhanced_volumes['OG_gaussian_volume_og'] , gamma=3)
-        enhanced_volumes['DESCARGAR_og_THRESHOLD_gamma'] = np.uint8(enhanced_volumes['OG_gamma_volume_og'] > 28) ####1: 115, 2: 87, 4:139, 5: 150, 6: 28, 7:76, 8: 49(queda contorno)
+        enhanced_volumes['DESCARGAR_OG_gamma_volume_og_164'] = np.uint8(enhanced_volumes['OG_gamma_volume_og'] > 164) ####1: 164, 2: 164, 4:139, 5: 150, 6: 28, 7:76, 8: 49(queda contorno)
         enhanced_volumes['OG_sharpened'] = sharpen_high_pass(enhanced_volumes['OG_gamma_volume_og'], strenght=0.8)
-        enhanced_volumes['DESCARGAR_SHARPENED'] = np.uint8(enhanced_volumes['OG_sharpened']>28) ##1:92, 3:134, 4:124, 5> 149, 6:28, 7:54
-        ###remove contour
-        enhanced_volumes['og_THRESHOLD_gamma_kinda'] = np.uint8(enhanced_volumes['OG_gamma_volume_og'] > 73)
-        enhanced_volumes['OG_MORPH_FIRST'] = morph_operations(enhanced_volumes['DESCARGAR_og_THRESHOLD_gamma'], operation= 'open', iterations= 5, kernel_size= 6, kernel_shape= 'square')
-        #enhanced_volumes['OG_HU_bones'] = threshold_bone_voxels_slice_by_slice(enhanced_volumes['OG_gamma_volume_og'])
-        enhanced_volumes['OG_gauss_volume_og'] = gaussian(enhanced_volumes['og_THRESHOLD_gamma_kinda'], sigma = 0.5) 
-        enhanced_volumes['OG_sharpened_volume_og'] = sharpen_high_pass(enhanced_volumes['OG_gauss_volume_og'], strenght = 0.7)
-        enhanced_volumes['DESCARGAR_og_THRESHOLD_sharpened'] = np.uint8(enhanced_volumes['OG_sharpened_volume_og'] > 28) ###1:0.00262 ,4:149, 5:132, 6:28, 8: 0.00150
-        enhanced_volumes['OG_WAVELET'] = wavelet_denoise(enhanced_volumes['OG_sharpened_volume_og'], wavelet='db1')
-        # enhanced_volumes['OG_LOG'] = log_transform_slices(enhanced_volumes['OG_sharpened_volume_og'], c= 3)
-        # enhanced_volumes['OG_FINAL_thresholded_ctp_per_og'] = np.uint8(enhanced_volumes['OG_LOG'] > 63) ### 5:187, 8: 63
-        # enhanced_volumes['OG_GAMMA_LOG'] = gamma_correction(enhanced_volumes['OG_LOG'], gamma= 1.8) 
-        # enhanced_volumes['OG_SHARPENED_3'] = sharpen_high_pass(enhanced_volumes['OG_GAMMA_LOG'], strenght=0.4)
+        enhanced_volumes['DESCARGAR_OG_sharpened_167'] = np.uint8(enhanced_volumes['OG_sharpened']>167) ##1:92, 2: 167, 3:134, 4:124, 5> 149, 6:28, 7:54
 
         ### 8 ###
         # enhanced_volumes['OG_gamma_2_volume_og_8'] = gamma_correction(enhanced_volumes['OG_gauss_volume_og'], gamma=2)
@@ -1040,25 +607,20 @@ def enhance_ctp(inputVolume, inputROI=None, methods = 'all', outputDir=None):
         # enhanced_volumes['MASK_LABEL_ctp'] = np.uint8(enhanced_volumes['gamma_ctp_2'] > 0) * 255
 
         #### PRUEBA ROI####
-        
         enhanced_volumes['PRUEBA_roi_plus_gamma_mask'] =  (final_roi > 0) * enhanced_volumes['OG_gamma_volume_og'] + (final_roi == 0) * 0 #enhanced_volumes['OG_gamma_volume_og']* final_roi
-        enhanced_volumes['DESCARGAR_PRUEBA_roi_plus_gamma_mask'] = np.uint8(enhanced_volumes['PRUEBA_roi_plus_gamma_mask']>21) #1: 119,2:93,3:130, 4:108, 8:58  ### 4: 122, 5:114, 6: 21, 7:77
+        enhanced_volumes['DESCARGAR_PRUEBA_roi_plus_gamma_mask_178'] = np.uint8(enhanced_volumes['PRUEBA_roi_plus_gamma_mask']>178) #1: 119,2:178,3:130, 4:108, 8:58  ### 4: 122, 5:114, 6: 21, 7:77
         enhanced_volumes['PRUEBA_roi_plus_gamma_mask_clahe'] = apply_clahe(enhanced_volumes['PRUEBA_roi_plus_gamma_mask'])
-        enhanced_volumes['DESCARGAR_PRUEBA_THRESHOLD_CLAHE'] = np.uint8(enhanced_volumes['PRUEBA_roi_plus_gamma_mask_clahe'] > 25) ## 1: 143, 3:149, 4:138,5:142, 6:25 2: 127, 8:57, 7:61
+        enhanced_volumes['DESCARGAR_PRUEBA_THRESHOLD_CLAHE_175'] = np.uint8(enhanced_volumes['PRUEBA_roi_plus_gamma_mask_clahe'] > 175) ## 1: 143, 3:149, 4:138,5:142, 6:25 2: 127, 8:57, 7:61
         enhanced_volumes['Prueba_final_roi'] = final_roi
         enhanced_volumes['PRUEBA_WAVELET_NL'] = wavelet_nlm_denoise(enhanced_volumes['PRUEBA_roi_plus_gamma_mask'], wavelet='db1')
-        enhanced_volumes['DESCARGAR_PRUEBA_THRESHOLD_NL_WAVELET'] = np.uint8(enhanced_volumes['PRUEBA_WAVELET_NL']> 37) ## 1: 106, 2:112,3:123, 4.115, 5:117,6:37,  8:42, 7:54
+        enhanced_volumes['DESCARGAR_PRUEBA_WAVELET_NL'] = np.uint8(enhanced_volumes['PRUEBA_WAVELET_NL']> 182) ## 1: 106, 2:112,3:123, 4.115, 5:117,6:37,  8:42, 7:54
         ########################################
         enhanced_volumes['gaussian_volume_roi'] = gaussian(enhanced_volumes['PRUEBA_roi_plus_gamma_mask'], sigma=0.3)
-        enhanced_volumes['DESCARGAR_PRUEBA_GAUSSIAN_thre'] = np.uint8(enhanced_volumes['gaussian_volume_roi'] > 0.0000000106) ### 1: 0.341,2:0.352, 3:0.430, 4: 0.352, 5: 0.525, 6: 0.0000000106, 8: 0.162, 7: 0.000000061
-        enhanced_volumes['PRUEBA_MORPH_OPEN_CONTOUR'] = morph_operations(enhanced_volumes['DESCARGAR_PRUEBA_GAUSSIAN_thre'], operation= 'open')
+        enhanced_volumes['DESCARGAR_PRUEBA_GAUSSIAN_thre_0.000000081'] = np.uint8(enhanced_volumes['gaussian_volume_roi'] > 0.000000081) ### 1: 0.341,2:0.000000081, 3:0.430, 4: 0.352, 5: 0.525, 6: 0.0000000106, 8: 0.162, 7: 0.000000061
         enhanced_volumes['sharpened_roi'] = sharpen_high_pass(enhanced_volumes['gaussian_volume_roi'], strenght = 0.5)
         enhanced_volumes['gamma_volume_roi'] = gamma_correction(enhanced_volumes['sharpened_roi'], gamma=2)
-        enhanced_volumes['DESCARGAR_PRUEBA_FINAL_thresholded_ctp_volume_roi'] = np.uint8(enhanced_volumes['gamma_volume_roi'] > 4) # 1: 86, 2:59, 3:62, 4: 80, 5: 101, 6: 4, 8:17, 7:57
+        enhanced_volumes['DESCARGAR_gamma_volume_roi_167'] = np.uint8(enhanced_volumes['gamma_volume_roi'] > 167) # 1: 86, 2:167, 3:62, 4: 80, 5: 101, 6: 4, 8:17, 7:57
         ####################
-        # enhanced_volumes['LOG_roi'] = log_transform_slices(enhanced_volumes['gamma_volume_roi'], c=0.5) ### ruido aumenta 
-        # enhanced_volumes['Morph_opening'] = morphological_opening_slice_by_slice(enhanced_volumes['gamma_volume_roi'], spacing=(1.0, 1.0), min_dist_mm=1)
-        # enhanced_volumes['FINAL_20_thresholded_ctp_volume_roi'] = threshold_metal_voxels_slice_by_slice(enhanced_volumes['Morph_opening'], percentile= 99.9)
         #######################
 
 
@@ -1066,16 +628,16 @@ def enhance_ctp(inputVolume, inputROI=None, methods = 'all', outputDir=None):
         enhanced_volumes['roi_volume'] = roi_volume
         enhanced_volumes['wavelet_only_roi'] = wavelet_denoise(enhanced_volumes['roi_volume'], wavelet= 'db1')
         enhanced_volumes['gamma_only_roi'] = gamma_correction(enhanced_volumes['wavelet_only_roi'], gamma=0.8)
-        # enhanced_volumes['sharpened_wavelet_roi'] = sharpen_high_pass(enhanced_volumes['wavelet_only_roi'], strenght= 0.5) 
-        # enhanced_volumes['sharpened_roi_only_roi'] = sharpen_high_pass(enhanced_volumes['roi_volume'], strenght = 0.8)
-        # enhanced_volumes['LOG_roi'] = log_transform_slices(enhanced_volumes['sharpened_roi_only_roi'], c=3)
+        enhanced_volumes['sharpened_wavelet_roi'] = sharpen_high_pass(enhanced_volumes['wavelet_only_roi'], strenght= 0.5) 
+        enhanced_volumes['sharpened_roi_only_roi'] = sharpen_high_pass(enhanced_volumes['roi_volume'], strenght = 0.8)
+        enhanced_volumes['LOG_roi'] = log_transform_slices(enhanced_volumes['sharpened_roi_only_roi'], c=3)
         #######
-        # enhanced_volumes['DESCARGAR_Threshold_roi_volume'] = np.uint8(enhanced_volumes['roi_volume']>1646)## 1: 1646, 4: 1526, 5: 2422, 8: 1539
-        # enhanced_volumes['DESCARGAR_WAVELET_ROI'] = np.uint8(enhanced_volumes['DESCARGAR_Threshold_roi_volume']>1876) #1: 1876
-        enhanced_volumes['DESCARGAR_GAMMA_ONLY_ROI'] = np.uint8(enhanced_volumes['gamma_only_roi']>125) ##1: 182,2:156,3:190, 4:166, 5:188, 6: 125, 8:163, 7:171
+        enhanced_volumes['DESCARGAR_Threshold_roi_volume_2346'] = np.uint8(enhanced_volumes['roi_volume']>2346)## 1: 1646, 2: 23464: 1526, 5: 2422, 8: 1539
+        enhanced_volumes['DESCARGAR_WAVELET_ROI_2626'] = np.uint8(enhanced_volumes['roi_volume']>2626) #1: 1876
+        enhanced_volumes['DESCARGAR_GAMMA_ONLY_ROI'] = np.uint8(enhanced_volumes['gamma_only_roi']>217) ##1: 182,2:217,3:190, 4:166, 5:188, 6: 125, 8:163, 7:171
        ### Prueba roi_plus gamma después###
         enhanced_volumes['2_gaussian_volume_roi'] = gaussian(enhanced_volumes['PRUEBA_roi_plus_gamma_mask'], sigma=0.3)
-        enhanced_volumes['DESCARGAR_GAUSSIAN_VOLUME_ROI'] = np.uint8(enhanced_volumes['2_gaussian_volume_roi']> 0.0000000089) #6
+        enhanced_volumes['DESCARGAR_2_gaussian_volume_roi_0.00000008'] = np.uint8(enhanced_volumes['2_gaussian_volume_roi']> 0.000000080) #6
         ###enhanced_volumes['2_clahe'] = apply_clahe(enhanced_volumes['wavelet_only_roi'])
        
         #enhanced_volumes['2_wavelet_denoised'] = wavelet_denoise(enhanced_volumes['2_gaussian_volume_roi'])
@@ -1084,70 +646,50 @@ def enhance_ctp(inputVolume, inputROI=None, methods = 'all', outputDir=None):
         #enhanced_volumes['DESCARGAR_SHARPENED_WAVELET'] = np.uint8(enhanced_volumes['2_sharpened_wavelet']>0.401) #1:0.298, 2:0.397, 3:0.415, 4:0.364, 5:0.401, 
 
         enhanced_volumes['2_gamma_correction'] = gamma_correction(enhanced_volumes['2_gaussian_volume_roi'] , gamma = 0.8)
-        enhanced_volumes['2_gamma_threshold'] = np.uint8(enhanced_volumes['2_gamma_correction'] >9) ## 8:9
+        enhanced_volumes['DESCARGAR_2_gamma_correction_214'] = np.uint8(enhanced_volumes['2_gamma_correction'] >214) ## 8:9
         kernel_2 = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (1, 1))
         tophat_2 = cv2.morphologyEx(enhanced_volumes['2_gaussian_volume_roi'], cv2.MORPH_TOPHAT, kernel_2)
         enhanced_volumes['2_tophat'] = cv2.addWeighted(enhanced_volumes['2_gaussian_volume_roi'], 1, tophat_2, 2, 0) ### 8:5 
-        enhanced_volumes['DESCARGAR_2_THRESHOLD_tophat'] = np.uint8(enhanced_volumes['2_tophat'] > 0.0000000158)  # 1: 0.415, 3:0.515, 4:0.427, 8:0.242,6: 0.0000000158,  7: 0.000000042
+        enhanced_volumes['DESCARGAR_2_tophat_0.000000083'] = np.uint8(enhanced_volumes['2_tophat'] > 0.000000083)  # 1: 0.415, 3:0.515, 4:0.427, 8:0.242,6: 0.0000000158,  7: 0.000000042
         enhanced_volumes['2_sharpened'] = sharpen_high_pass(enhanced_volumes['2_gamma_correction'], strenght = 0.8)
-        enhanced_volumes['DESCARGAR_2_THRESHOLD_sharpened'] = np.uint8(enhanced_volumes['2_sharpened'] > 51) ##1: 134, 2:109,3:143, 4:121, 5: 121, 6: 51, 8:91, 7:134
+        enhanced_volumes['DESCARGAR_2_sharpened_199'] = np.uint8(enhanced_volumes['2_sharpened'] > 199) ##1: 134, 2:109,3:143, 4:121, 5: 121, 6: 51, 8:91, 7:134
         # Apply white top-hat transformation
         enhanced_volumes['2_LOG'] = log_transform_slices(enhanced_volumes['2_tophat'], c=3)
-        #enhanced_volumes['DESCARGAR_2_FINAL_2_LOG_roi'] = np.uint8(enhanced_volumes['2_LOG'] > 98) ### 1: 97, 2:100, 3:146, 4:106, 5 : 111, 8:91, 7: 78
+        enhanced_volumes['DESCARGAR_2_LOG_199'] = np.uint8(enhanced_volumes['2_LOG'] > 199) ### 1: 97, 2:100, 3:146, 4:106, 5 : 111, 8:91, 7: 78
         enhanced_volumes['2_wavelet_roi'] = wavelet_denoise(enhanced_volumes['2_LOG'], wavelet='db4')
-        #enhanced_volumes['DESCARGAR_2_WAVELET'] = np.uint8(enhanced_volumes['2_wavelet_roi']>124) ##1: 125, 2:80, 3:137, 4:130, 5: 160, 7:124
+        enhanced_volumes['DESCARGAR_2_wavelet_roi_154'] = np.uint8(enhanced_volumes['2_wavelet_roi']>154) ##1: 125, 2:80, 3:137, 4:130, 5: 160, 7:124
         enhanced_volumes['2_erode'] = morphological_operation(enhanced_volumes['2_sharpened'], operation='erode', kernel_size=1)
-        enhanced_volumes['2_threshold_erode'] = np.uint8(enhanced_volumes['2_erode'] > 106) ##1:150, 2:145, 4:106, 8:93
+        enhanced_volumes['DESCARGAR_2__207'] = np.uint8(enhanced_volumes['2_erode'] > 207) ##1:150, 2:145, 4:106, 8:93
         enhanced_volumes['2_gaussian_2'] = gaussian(enhanced_volumes['2_erode'], sigma= 0.2)
         enhanced_volumes['2_sharpening_2_trial'] = sharpen_high_pass(enhanced_volumes['2_gaussian_2'], strenght = 0.8)
-        enhanced_volumes['DESCARGAR_2_SHARPENING'] = np.uint8(enhanced_volumes['2_sharpening_2_trial']>0.207) ##1: 0.47, 2:0.47, 3:0.571, 4:0.515, 5: 0.445, 6: 0.207, 7: 0.303
-        #enhanced_volumes['2_threshold_gaussian_2'] = np.uint8(enhanced_volumes['2_gaussian_2']>0.018)
-        # enhanced_volumes['opening'] = morph_operations(enhanced_volumes['gamma_2'], iterations=2, kernel_shape= 'cross')
-        # enhanced_volumes['gamma_3'] = gamma_correction(enhanced_volumes['tophat'], gamma= 2) 
-        #enhanced_volumes['2_denoised_roi_final'] = wavelet_denoise(enhanced_volumes['2_gaussian_2'])
-        #enhanced_volumes['gamma_4'] = gamma_correction(enhanced_volumes['denoised_roi_final'], gamma= 3)
-        #enhanced_volumes['2_FINAL_20_MASK_LABEL'] = threshold_metal_voxels_slice_by_slice(enhanced_volumes['2_denoised_roi_final'], percentile= 99.9)
+        enhanced_volumes['DESCARGAR_2_sharpening_2_trial_0.789'] = np.uint8(enhanced_volumes['2_sharpening_2_trial']>0.789) ##1: 0.47, 2:0.789, 3:0.571, 4:0.515, 5: 0.445, 6: 0.207, 7: 0.303
+
 
         ### Prueba otras cosas ###
-
         enhanced_volumes['NUEVO_NLMEANS'] = wavelet_nlm_denoise(enhanced_volumes['roi_volume'])
-        enhanced_volumes['NUEVO_THRESHOLD_NLMEANS'] = np.uint8(enhanced_volumes['NUEVO_NLMEANS']>936) ###1: 1946,2: 1386, 3:1856, 4:1546,5: 2022, 6: 936,  8:1510; 7: 1368
+        enhanced_volumes['DESCARGAR_NUEVO_NLMEANS_2226'] = np.uint8(enhanced_volumes['NUEVO_NLMEANS']>2226) ###1: 1946,2: 1386, 3:1856, 4:1546,5: 2022, 6: 936,  8:1510; 7: 1368
 
-
-        # enhanced_volumes['NUEVO_NLMEANS_2'] = wavelet_nlm_denoise(enhanced_volumes['NUEVO_NLMEANS'] )
-        # enhanced_volumes['DESCARGAR_NUEVO_NLMEANS'] = np.uint8(enhanced_volumes['NUEVO_NLMEANS_2']>1070)
-        # enhanced_volumes['NUEVO_try_1'] =   enhance_electrode_brightness_slice_by_slice(enhanced_volumes['roi_volume'], method = 'intensity_scaling')
-        # enhanced_volumes['NUEVO_T1_THRESHOLD'] = np.uint8(enhanced_volumes['NUEVO_try_1']>0.62) ##8:0.62
-        # enhanced_volumes['NUEVO_try_2'] =   enhance_electrode_brightness_slice_by_slice(enhanced_volumes['NUEVO_NLMEANS'] , method= 'unsharp')
-        # enhanced_volumes['NUEVO_FOURIER'] = sharpen_fourier(enhanced_volumes['roi_volume'])
-
-        
         ###ORGINAL_IDEA ####
         enhanced_volumes['ORGINAL_IDEA_gaussian'] = gaussian(enhanced_volumes['PRUEBA_roi_plus_gamma_mask'], sigma= 0.3)
        # enhanced_volumes['FINAL_ORGINAL_IDEA_GAUSSIAN_THRESHOLD'] = np.uint8(enhanced_volumes['ORGINAL_IDEA_gaussian'] > 0.055)  ### 8:0.055 (no completo)
         enhanced_volumes['ORGINAL_IDEA_gamma_correction'] = gamma_correction(enhanced_volumes['ORGINAL_IDEA_gaussian'], gamma = 2)
+        enhanced_volumes['DESCARGAR_ORGINAL_IDEA_gamma_correction_164)'] = np.uint8(enhanced_volumes['ORGINAL_IDEA_gamma_correction'] > 164) ##1: 1, 2:2, 3:3, 4:1, 5:2, 6:0, 7:0, 8:0
         enhanced_volumes['ORGINAL_IDEA_sharpened'] = sharpen_high_pass(enhanced_volumes['ORGINAL_IDEA_gamma_correction'], strenght = 0.8)
-        enhanced_volumes['DESCARGAR_ORIGINAL_IDEA_SHARPENED_LABEL'] = np.uint8(enhanced_volumes['ORGINAL_IDEA_sharpened'] > 3) ### 1: 70, 2:72, 3:84, 4:46, 5:82 8: 25, 7:69, 6: 3
-        enhanced_volumes['ORIGINAL_IDEA_SHARPENED_OPENING'] = morph_operations(enhanced_volumes['DESCARGAR_ORIGINAL_IDEA_SHARPENED_LABEL'], operation= 'open', kernel_shape= 'cross', kernel_size= 1)
+        enhanced_volumes['DESCARGAR_ORGINAL_IDEA_sharpened_141'] = np.uint8(enhanced_volumes['ORGINAL_IDEA_sharpened'] > 141) ### 1: 70, 2:141, 3:84, 4:46, 5:82 8: 25, 7:69, 6: 3
+        enhanced_volumes['ORIGINAL_IDEA_SHARPENED_OPENING'] = morph_operations(enhanced_volumes['DESCARGAR_ORGINAL_IDEA_sharpened_141'], operation= 'open', kernel_shape= 'cross', kernel_size= 1)
         enhanced_volumes['ORIGINAL_IDEA_wavelet'] = wavelet_denoise(enhanced_volumes['ORGINAL_IDEA_sharpened'])
-        enhanced_volumes['DESCARGAR_ORGINAL_IDEA_FINAL_MASK_LABEL'] = np.uint8(enhanced_volumes['ORIGINAL_IDEA_wavelet']>2) ## 1: 58, 2:71,3:103, 4:48,5:72,  8:18, 7:93, 6:2
+        enhanced_volumes['DESCARGAR_ORIGINAL_IDEA_wavelet_127'] = np.uint8(enhanced_volumes['ORIGINAL_IDEA_wavelet']>127) ## 1: 58, 2:71,3:103, 4:48,5:72,  8:18, 7:93, 6:2
         enhanced_volumes['ORGINAL_IDEA_gaussian_2'] = gaussian(enhanced_volumes['ORGINAL_IDEA_sharpened'], sigma= 0.4)
-        enhanced_volumes['ORGINAL_IDEA_gaussian_2_thershold'] = np.uint8(enhanced_volumes['ORGINAL_IDEA_gaussian_2']>0.318) #1: 0.161, 2:0.193,3:0.318 8:0.057
+        enhanced_volumes['DESCARGAR_ORGINAL_IDEA_gaussian_2_0.563'] = np.uint8(enhanced_volumes['ORGINAL_IDEA_gaussian_2']>0.563) #1: 0.161, 2:0.193,3:0.318 8:0.057
         enhanced_volumes['ORIGINAL_IDEA_GAMMA_2'] = gamma_correction(enhanced_volumes['ORGINAL_IDEA_gaussian_2'], gamma = 1.4)
-        enhanced_volumes['DESCARGAR_GAMMA_2'] = np.uint8(enhanced_volumes['ORIGINAL_IDEA_GAMMA_2']>3) ##1: 39, 2:56, 3:65,4:26,5:70,6: 3,  8:8, 7:39
+        enhanced_volumes['DESCARGAR_ORIGINAL_IDEA_GAMMA_2_132'] = np.uint8(enhanced_volumes['ORIGINAL_IDEA_GAMMA_2']>132) ##1: 39, 2:56, 3:65,4:26,5:70,6: 3,  8:8, 7:39
         kernel_size_og = (1, 1) 
         kernel_og = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, kernel_size_og)
         tophat_og = cv2.morphologyEx(enhanced_volumes['ORGINAL_IDEA_gaussian_2'], cv2.MORPH_TOPHAT, kernel_og)
         enhanced_volumes['OG_tophat_1'] = cv2.addWeighted(enhanced_volumes['ORGINAL_IDEA_gaussian_2'], 1, tophat_og, 2, 0)
-        enhanced_volumes['DESCARGAR_OG_TOPHAT_1'] = np.uint8(enhanced_volumes['OG_tophat_1']>0.027) #1: 0.217, 2:0.276 3:0.29, 4:0.128, 5: 0.372, 6: 0.027
+        enhanced_volumes['DESCARGAR_OG_tophat_1_0.538'] = np.uint8(enhanced_volumes['OG_tophat_1']>0.538) #1: 0.217, 2:0.276 3:0.29, 4:0.128, 5: 0.372, 6: 0.027
         #enhanced_volumes['OG_GAUSSIAN_TOPHAT'] = gaussian(enhanced_volumes['OG_tophat_1'], sigma= 0.9)
         
-        #enhanced_volumes['OG_RESTA'] = enhanced_volumes['OG_tophat_1'] - gaussian(roi_volume, sigma= 0.8)
-        # enhanced_volumes['ORIGINAL_IDEA_THRESHOLD_GAMMA_2'] = np.uint8(enhanced_volumes['ORIGINAL_IDEA_GAMMA_2'] > 9)
-        # enhanced_volumes['ORIGINAL_IDEA_OPENING'] = morph_operations(enhanced_volumes['ORIGINAL_IDEA_GAMMA_2'], iterations=2, kernel_shape= 'cross')
-        # enhanced_volumes['ORGINAL_IDEA__FINAL_MASK_LABEL'] = threshold_metal_voxels_slice_by_slice(enhanced_volumes['ORIGINAL_IDEA_OPENING'], percentile= 99.9)
-        # enhanced_volumes['ORIGINAL_OPENINING'] = morphological_opening_slice_by_slice(enhanced_volumes['ORGINAL_IDEA__FINAL_MASK_LABEL'], spacing=(1.0, 1.0), min_dist_mm=0.05)
-
         ### First try ###
 
         enhanced_volumes['FT_gaussian'] = gaussian(roi_volume, sigma= 0.3)
@@ -1156,44 +698,39 @@ def enhance_ctp(inputVolume, inputROI=None, methods = 'all', outputDir=None):
         tophat_ft = cv2.morphologyEx(roi_volume, cv2.MORPH_TOPHAT, kernel)
         enhanced_volumes['FT_tophat_1'] = cv2.addWeighted(roi_volume, 1, tophat_ft, 2, 0)
         enhanced_volumes['FT_RESTA_TOPHAT_GAUSSIAN'] = enhanced_volumes['FT_tophat_1'] - gaussian(roi_volume, sigma= 0.8)
-        enhanced_volumes['DESCARGAR_FT_RESTA_TOPHAT_GAUSSIAN'] = np.uint(enhanced_volumes['FT_RESTA_TOPHAT_GAUSSIAN'] >129)  #1:594,2:929,3:1178,4:493,5:1103,  8:378, 7: 396,6: 129
+        enhanced_volumes['DESCARGAR_FT_RESTA_TOPHAT_GAUSSIAN_1516'] = np.uint(enhanced_volumes['FT_RESTA_TOPHAT_GAUSSIAN'] >1516)  #1:594,2:929,3:1178,4:493,5:1103,  8:378, 7: 396,6: 129
         enhanced_volumes['FT_gamma_correction'] = gamma_correction(enhanced_volumes['FT_gaussian'], gamma = 5)
         #enhanced_volumes['FINAL_FT_gamma_THRESHOLD'] = np.uint8(enhanced_volumes['FT_gamma_correction'] > 24) 
         enhanced_volumes['FT_sharpened'] = sharpen_high_pass(enhanced_volumes['FT_gamma_correction'], strenght = 0.4)
-        enhanced_volumes['FT_sharpened_threshold'] = np.uint8(enhanced_volumes['FT_sharpened']>27) #1:27, 2: 63
+        enhanced_volumes['DESCARGAR_FT_sharpened_146'] = np.uint8(enhanced_volumes['FT_sharpened']>146) #1:27, 2: 63
         enhanced_volumes['FT_gaussian_2'] = gaussian(enhanced_volumes['FT_sharpened'], sigma= 0.4)
-        enhanced_volumes['FT_gaussinan_threshold'] = np.uint8(enhanced_volumes['FT_gaussian_2'] > 0.275) #1:0.205, 2:0.257, 3:0.275, 8:0.155
+        enhanced_volumes['DESCARGAR_FT_gaussian_2_0.482'] = np.uint8(enhanced_volumes['FT_gaussian_2'] > 0.482) #1:0.205, 2:0.257, 3:0.275, 8:0.155
         enhanced_volumes['FT_gamma_2'] = gamma_correction(enhanced_volumes['FT_gaussian_2'], gamma= 1.2)
-        enhanced_volumes['DESCARGAR_FT_GAMMA_2'] = np.uint8(enhanced_volumes['FT_gamma_2']>4) #1: 32, 2:47, 3:72,4:16,5: 86,  8:15, 7:40,6 :4
+        enhanced_volumes['DESCARGAR_FT_GAMMA_2_106'] = np.uint8(enhanced_volumes['FT_gamma_2']>106) #1: 32, 2:47, 3:72,4:16,5: 86,  8:15, 7:40,6 :4
         enhanced_volumes['FT_opening'] = morph_operations(enhanced_volumes['FT_gamma_2'], iterations=2, kernel_shape= 'cross')
         enhanced_volumes['FT_closing'] = morph_operations(enhanced_volumes['FT_opening'], operation= 'close')
         #enhanced_volumes['wo_large_objects'] = remove_large_objects(enhanced_volumes['closing'], size_threshold= 9000)
         enhanced_volumes['FT_erode_2'] = morphological_operation(enhanced_volumes['FT_closing'], operation='erode', kernel_size=1)
-        enhanced_volumes['DESCARGAR_FT_ERODE_2'] = np.uint8(enhanced_volumes['FT_erode_2']>6) #1:35, 2:42,3:68,4:10,5: 85,  8:18, 7: 35, 6: 6
+        enhanced_volumes['DESCARGAR_FT_ERODE_2_133'] = np.uint8(enhanced_volumes['FT_erode_2']>133) #1:35, 2:42,3:68,4:10,5: 85,  8:18, 7: 35, 6: 6
         # Create an elliptical structuring element (adjust size if needed)
         kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (1, 1))
         # Apply white top-hat transformation
         tophat = cv2.morphologyEx(enhanced_volumes['FT_gaussian_2'], cv2.MORPH_TOPHAT, kernel)
         enhanced_volumes['FT_tophat'] = cv2.addWeighted(enhanced_volumes['FT_gaussian_2'], 1, tophat, 2, 0)
-        enhanced_volumes['DESCARGAR_FT_THRESHOLD_TOPHAT'] = np.uint8(enhanced_volumes['FT_tophat'] > 0.034) #1: 0.145, 3:0.313, 4:0.068, 5: 0.396 ,6: 0.034,  8:0.090; 7: 0.170
+        enhanced_volumes['DESCARGAR_FT_TOPHAT_0.490'] = np.uint8(enhanced_volumes['FT_tophat'] > 0.490) #1: 0.145, 3:0.313, 4:0.068, 5: 0.396 ,6: 0.034,  8:0.090; 7: 0.170
         #################
         enhanced_volumes['FT_gaussian_3'] = gaussian(enhanced_volumes['FT_tophat'], sigma= 0.1)
-        enhanced_volumes['DESCARGAR_FT_THRESHOLD_GAMMA_3'] = np.uint8(enhanced_volumes['FT_gaussian_3'] > 0.034) ##1: 0.123, 2:0.179, 3:0.305,4:0.064,5: 0.363,6:0.034,  8:0.101, 7: 0.313
+        enhanced_volumes['DESCARGAR_FT_gaussian_3_0.540'] = np.uint8(enhanced_volumes['FT_gaussian_3'] > 0.540) ##1: 0.123, 2:0.179, 3:0.305,4:0.064,5: 0.363,6:0.034,  8:0.101, 7: 0.313
         ##################
-
-
-
     if outputDir is None:
         outputDir = slicer.app.temporaryPath()  
-    
     if not os.path.exists(outputDir):
         os.makedirs(outputDir)
-
     # Process each enhanced volume
     enhancedVolumeNodes = {}
     for method_name, enhanced_image in enhanced_volumes.items():
         enhancedVolumeNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLScalarVolumeNode")
-        enhancedVolumeNode.SetName(f"Enhanced_th20_{method_name}_{inputVolume.GetName()}")
+        enhancedVolumeNode.SetName(f"Enhanced_th45_{method_name}_{inputVolume.GetName()}")
         enhancedVolumeNode.SetOrigin(inputVolume.GetOrigin())
         enhancedVolumeNode.SetSpacing(inputVolume.GetSpacing())
         ijkToRasMatrix = vtk.vtkMatrix4x4()
@@ -1201,104 +738,23 @@ def enhance_ctp(inputVolume, inputROI=None, methods = 'all', outputDir=None):
         enhancedVolumeNode.SetIJKToRASMatrix(ijkToRasMatrix) 
         slicer.util.updateVolumeFromArray(enhancedVolumeNode, enhanced_image)
         enhancedVolumeNodes[method_name] = enhancedVolumeNode
-        output_file = os.path.join(outputDir, f"Filtered_th_35_{method_name}_{inputVolume.GetName()}.nrrd")
+        output_file = os.path.join(outputDir, f"Filtered_th_45_{method_name}_{inputVolume.GetName()}.nrrd")
         slicer.util.saveNode(enhancedVolumeNode, output_file)
         print(f"Saved {method_name} enhancement as: {output_file}")
-    
     return enhancedVolumeNodes
 
-#################################################
-## Adding more filters in case it's necessary ###
-################################################
 
-def add_more_filter(inputVolume, selected_filters=None, outputDir=None):
-
-    if selected_filters is None:
-        selected_filters = []
-    volume_array = slicer.util.arrayFromVolume(inputVolume)
-    if volume_array is None or volume_array.size == 0:
-        slicer.util.errorDisplay("Input volume data is empty or invalid.")
-        return None
-    if 'morph_operations' in selected_filters:
-        print("Applying morphological operations...")
-        volume_array = morph_operations(volume_array)
-
-    if 'canny_edge' in selected_filters:
-        print("Applying Canny edge detection...")
-        volume_array = canny_edges(volume_array)
-
-    if 'high_pass_sharpening' in selected_filters:
-        print("Applying high pass sharpening...")
-        volume_array = sharpen_high_pass(volume_array)
-
-    enhancedVolumeNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLScalarVolumeNode")
-    enhancedVolumeNode.SetName(f"Enhanced_{inputVolume.GetName()}")
-    enhancedVolumeNode.SetOrigin(inputVolume.GetOrigin())
-    enhancedVolumeNode.SetSpacing(inputVolume.GetSpacing())
-    ijkToRasMatrix = vtk.vtkMatrix4x4()
-    inputVolume.GetIJKToRASMatrix(ijkToRasMatrix)
-    enhancedVolumeNode.SetIJKToRASMatrix(ijkToRasMatrix)
-    slicer.util.updateVolumeFromArray(enhancedVolumeNode, volume_array)
-  
-    if outputDir:
-        output_file = os.path.join(outputDir, f"Enhanced_more_filters_{inputVolume.GetName()}.nrrd")
-        slicer.util.saveNode(enhancedVolumeNode, output_file)
-        print(f"Saved enhanced volume with filters as: {output_file}")
-    return enhancedVolumeNode
-      
 ####################
-# inputVolume = slicer.util.getNode('CTp.3D')  
-# inputROI = slicer.util.getNode('patient7_resampled_sy_mask')  # Brain Mask 
-# # # # # Define the file path to save the CSV
-# # # file_path = r'C:\\Users\\rocia\\Downloads\\TFG\\Cohort\\Enhance_ctp_tests\\P5\\P5_centroids_and_coordinates.csv'
-
-# #enhancedVolumeNode = slicer.util.getNode('Enhanced_gamma_4_CTp.3D')
-
-# # # volume_array = slicer.util.arrayFromVolume(enhancedVolumeNode)
-
-# # # mask_label = np.uint8(volume_array > 0) * 255
-
-# # # # # # Save the centroids and coordinates to CSV
-# # # save_centroids_to_csv(mask_label, file_path, inputVolume, enhancedVolumeNode)
-
-
-
+inputVolume = slicer.util.getNode('CTp.3D')  
+inputROI = slicer.util.getNode('patient2_mask_5')  # Brain Mask 
 # # # # # # # Output directory
-outputDir = r'C:\\Users\\rocia\\Downloads\\TFG\\Cohort\\Enhance_ctp_tests\\P7\\TH35'  
-
+outputDir = r"C:\Users\rocia\Downloads\TFG\Cohort\Enhance_ctp_tests\P2\TH50"
 # # # # # # # # # # # Test the function 
 enhancedVolumeNodes = enhance_ctp(inputVolume, inputROI, methods='all', outputDir=outputDir)
-
 # # # # # # # # # # # Access the enhanced volume nodes
 for method, volume_node in enhancedVolumeNodes.items():
               if volume_node is not None:
                   print(f"Enhanced volume for method '{method}': {volume_node.GetName()}")
               else:
                   print(f"Enhanced volume for method '{method}': No volume node available.")
-
-
-# vol_hist = slicer.util.getNode('ctp.3D')
-
-# def show_histograms(volume_node, title='Histogram'):
-#     # Convert volume node to NumPy array
-#     vol_array = slicer.util.arrayFromVolume(volume_node)
-    
-#     if vol_array is None:
-#         raise ValueError("Failed to get voxel data from the volume node.")
-
-#     # Flatten the array and compute the histogram
-#     histogram_og, bin_edges = np.histogram(vol_array.flatten(), bins=256, range=(0, 255))
-    
-#     # Create bin centers
-#     bin_centers = (bin_edges[:-1] + bin_edges[1:]) / 2
-
-#     # Stack data into a 2D array (Slicer expects a table format)
-#     histogram_data = np.column_stack((bin_centers, histogram_og))
-
-#     # Plot histogram
-#     slicer.util.plot(histogram_data, title=title)
-
-# show_histograms(vol_hist)
-
-
-#exec(open('C:/Users/rocia/AppData/Local/slicer.org/Slicer 5.6.2/SEEG_module/SEEG_masking/enhance_ctp.py').read())
+#exec(open(r'C:\Users\rocia\AppData\Local\slicer.org\Slicer 5.6.2\SEEG_module\SEEG_masking\Threshold_mask\enhance_ctp.py').read())

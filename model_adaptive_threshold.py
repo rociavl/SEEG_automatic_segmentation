@@ -8,6 +8,9 @@ from sklearn.model_selection import LeaveOneOut
 from sklearn.metrics import mean_absolute_error
 import joblib
 
+
+### I need more data 
+
 data_dir = "data/nrrd_masks/"
 best_thresholds = {  
     "patient_1_mask_1.nrrd": 450,
@@ -16,12 +19,10 @@ best_thresholds = {
 }
 
 def load_nrrd(file_path):
-    """Load raw NRRD file without normalization."""
     volume, _ = nrrd.read(file_path)
     return volume
 
 def extract_histogram_features(mask, bins=20):
-    """Extract features from raw intensity histogram."""
     mask_flat = mask.flatten()
     vmin, vmax = np.min(mask_flat), np.max(mask_flat)
     hist, bin_edges = np.histogram(mask_flat, bins=bins, range=(vmin, vmax), density=True)

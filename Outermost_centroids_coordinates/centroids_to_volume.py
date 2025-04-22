@@ -67,10 +67,10 @@ def read_fiducial_csv(csv_path):
 
 def main():
     # Paths - replace these with your actual paths
-    fiducial_csv_path = r'C:\Users\rocia\Downloads\TFG\Cohort\Centroids\P1\P1_colab\P1_validated_centroids.csv'
+    fiducial_csv_path = r"C:\Users\rocia\Downloads\TFG\Cohort\Centroids\P1\P1_colab\results_2_mask1\\P1_validated_centroids_mask_1.csv"
     volume_path = r"C:\Users\rocia\Downloads\TFG\Cohort\Models\Model_brain_mask\Dataset\MASK\patient1_mask_5.nrrd"  
-    output_mask_path = r'C:\Users\rocia\Downloads\TFG\Cohort\Centroids\P1\P1_colab\validated_electrode_mask.nrrd'
-    output_csv_path = r'C:\Users\rocia\Downloads\TFG\Cohort\Centroids\P1\P1_colab\processed_validated_LPS_fiducials.csv'
+    output_mask_path = r"C:\Users\rocia\Downloads\TFG\Cohort\Centroids\P1\P1_colab\results_2_mask1\validated_electrode_mask_1.nrrd"
+    output_csv_path = r'C:\Users\rocia\Downloads\TFG\Cohort\Centroids\P1\P1_colab\results_2_mask1\processed_validated_LPS_fiducials.csv'
 
     # Read fiducials from CSV
     fiducials = read_fiducial_csv(fiducial_csv_path)

@@ -17,8 +17,8 @@ def process_centroids(input_csv, output_csv):
     print(f"Validated centroids saved to {output_csv}")
     return validated_centroids
 
-input_file = r"C:\Users\rocia\Downloads\TFG\Cohort\Centroids\P1\P1_colab\patient_P1_patient1_mask_electrodes_3_results.csv"
-output_file = r"C:\Users\rocia\Downloads\TFG\Cohort\Centroids\P1\P1_colab\P1_validated_centroids.csv"
+input_file = r"C:\Users\rocia\Downloads\patient_P1_ensemble_intermediate.csv"
+output_file = r"C:\Users\rocia\Downloads\TFG\Cohort\Centroids\P1\P1_colab\results_2_mask1\\P1_validated_centroids_mask_1_ENSEMBLE.csv"
 result = process_centroids(input_file, output_file)
 print(result.head())
 

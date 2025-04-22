@@ -202,9 +202,9 @@ def main():
     try:
         ground_truth_volume = slicer.util.getNode("P1_electrode_fiducials")
         mask_volumes = [
-            slicer.util.getNode("patient1_mask_electrodes_1"),
-            slicer.util.getNode("patient1_mask_electrodes_2"),
-            slicer.util.getNode("patient1_mask_electrodes_3"),
+            slicer.util.getNode("validated_electrode_mask_1_1"),
+            slicer.util.getNode("patient1_mask_electrodes_4"),
+            slicer.util.getNode("patient1_mask_electrodes_5"),
         ]
     except Exception as e:
         logging.error(f"Failed to retrieve volumes: {str(e)}")

@@ -3,9 +3,7 @@ import vtk
 import numpy as np
 
 def resample_mask(input_mask_name, reference_volume_name, output_mask_name=None, output_path=None):
-
     try:
-
         input_mask = slicer.util.getNode(input_mask_name)
         reference_volume = slicer.util.getNode(reference_volume_name)
         if not input_mask or not reference_volume:
@@ -17,7 +15,6 @@ def resample_mask(input_mask_name, reference_volume_name, output_mask_name=None,
         reference_spacing = np.array(reference_volume.GetSpacing())
         ijk_to_ras_matrix = vtk.vtkMatrix4x4()
         reference_volume.GetIJKToRASMatrix(ijk_to_ras_matrix)
-
         output_mask = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLScalarVolumeNode", output_mask_name)
 
         parameters = {
@@ -32,12 +29,10 @@ def resample_mask(input_mask_name, reference_volume_name, output_mask_name=None,
         if output_path:
             slicer.util.saveNode(output_mask, output_path)
             print(f"Resampling complete. Saved to {output_path}")
-
         print(f"Resampled mask '{output_mask_name}' successfully created and aligned.")
 
     except Exception as e:
         print(f"Error: {e}")
-
 
 resample_mask("patient6_mask_7", "CTp.3D",  'patient_mask_resampled',r'C:\\Users\\rocia\\Downloads\\TFG\\Cohort\\Enhance_ctp_tests\\patient6_resampled_sy_mask_7.nrrd')
 

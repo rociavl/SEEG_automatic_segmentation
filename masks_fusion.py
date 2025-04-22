@@ -79,12 +79,12 @@ def process_masks(mask_node_names, weights=None, output_node_name="FusedMask", o
     create_fused_volume_node(fused_mask, input_volume, output_node_name, output_dir)
 
 mask_node_names = [
-    "Filtered_th_20_DESCARGAR_ORIGINAL_IDEA_SHARPENED_LABEL_ctp.3D",
-    "Filtered_th_50_DESCARGAR_TH50_P1_wavelet_only_roi_ctp.3D",
-    "Filtered_th_20_DESCARGAR_ORGINAL_IDEA_FINAL_MASK_LABEL_ctp.3D"
+    "Enhanced_th45_DESCARGAR_FT_gaussian_3_0.540_CTp.3D",
+    "Enhanced_th45_DESCARGAR_FT_TOPHAT_0.490_CTp.3D",
+    "Enhanced_th45_DESCARGAR_FT_ERODE_2_133_CTp.3D"
 ]  
 weights = [0.4, 0.3, 0.3]  
-output_dir = r'C:\\Users\\rocia\\Downloads\\TFG\\Cohort\\Enhance_ctp_tests\\P1' 
-process_masks(mask_node_names, weights, output_dir=output_dir, output_node_name="patient1_mask_electrodes_3")
+output_dir = r'C:\\Users\\rocia\\Downloads\\TFG\\Cohort\\Enhance_ctp_tests\\P2' 
+process_masks(mask_node_names, weights, output_dir=output_dir, output_node_name="patient2_mask_electrodes_1")
 
 #exec(open('C:/Users/rocia/AppData/Local/slicer.org/Slicer 5.6.2/SEEG_module/SEEG_masking/masks_fusion.py').read())

@@ -36,7 +36,6 @@ def get_bounds_from_volume(volume_node):
     return bounds
 
 def get_mask_extent(mask_array):
-    """Calculate the extent of non-zero voxels in the mask (number of non-zero voxels)."""
     return np.sum(mask_array > 0)
 
 def get_mask_centroid(mask_array):
