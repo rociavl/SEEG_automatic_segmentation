@@ -52,7 +52,7 @@ from skimage.segmentation import watershed
 from skimage.feature import peak_local_max
 import logging
 from skimage import restoration
-from enhance_ctp import gamma_correction, sharpen_high_pass, log_transform_slices, wavelet_denoise, wavelet_nlm_denoise, morphological_operation, apply_clahe,morph_operations  
+from Threshold_mask.enhance_ctp import gamma_correction, sharpen_high_pass, log_transform_slices, wavelet_denoise, wavelet_nlm_denoise, morphological_operation, apply_clahe,morph_operations  
 
 def shannon_entropy(image):
     """Calculate Shannon entropy of an image."""
@@ -64,24 +64,116 @@ def shannon_entropy(image):
     # Calculate entropy
     return -np.sum(hist * np.log2(hist))
 
-def collect_histogram_data(enhanced_volumes, threshold_tracker, outputDir=None):
-    """
-    Collect histogram data for each enhanced volume and save as CSV.
+def extract_advanced_features(volume_array, hist=None, bin_centers=None):
+    import numpy as np
+    from scipy import stats
     
-    Parameters:
-    -----------
-    enhanced_volumes : dict
-        Dictionary of enhanced volume arrays
-    threshold_tracker : dict
-        Dictionary of thresholds used for each method
-    outputDir : str, optional
-        Directory to save histogram data
+    features = {}
+    features['min'] = np.min(volume_array)
+    features['max'] = np.max(volume_array)
+    features['mean'] = np.mean(volume_array)
+    features['median'] = np.median(volume_array)
+    features['std'] = np.std(volume_array)
+    features['p25'] = np.percentile(volume_array, 25)
+    features['p75'] = np.percentile(volume_array, 75)
+    features['p95'] = np.percentile(volume_array, 95)
+    features['p99'] = np.percentile(volume_array, 99)
+    # Compute histogram if not provided
+    if hist is None or bin_centers is None:
+        hist, bin_edges = np.histogram(volume_array.flatten(), bins=256)
+        bin_centers = (bin_edges[:-1] + bin_edges[1:]) / 2
+    # Handle zero-peak special case for small dot segmentation
+    zero_idx = np.argmin(np.abs(bin_centers))  # Index closest to zero
+    zero_peak_height = hist[zero_idx]
+    features['zero_peak_height'] = zero_peak_height
+    features['zero_peak_ratio'] = zero_peak_height / np.sum(hist) if np.sum(hist) > 0 else 0
+    # Add very high percentiles that might better capture small bright dots
+    features['p99.5'] = np.percentile(volume_array, 99.5)
+    features['p99.9'] = np.percentile(volume_array, 99.9)
+    features['p99.99'] = np.percentile(volume_array, 99.99)
+    # Calculate skewness and kurtosis for the distribution
+    features['skewness'] = stats.skew(volume_array.flatten())
+    features['kurtosis'] = stats.kurtosis(volume_array.flatten())
+    # Calculate non-zero statistics (ignoring background)
+    non_zero_values = volume_array[volume_array > 0]
+    if len(non_zero_values) > 0:
+        features['non_zero_min'] = np.min(non_zero_values)
+        features['non_zero_mean'] = np.mean(non_zero_values)
+        features['non_zero_median'] = np.median(non_zero_values)
+        features['non_zero_std'] = np.std(non_zero_values)
+        features['non_zero_count'] = len(non_zero_values)
+        features['non_zero_ratio'] = len(non_zero_values) / volume_array.size
+        # Calculate skewness and kurtosis for non-zero values
+        if len(non_zero_values) > 3:  # Need at least 3 points for skewness calculation
+            features['non_zero_skewness'] = stats.skew(non_zero_values)
+            features['non_zero_kurtosis'] = stats.kurtosis(non_zero_values)
+        else:
+            features['non_zero_skewness'] = 0
+            features['non_zero_kurtosis'] = 0
+    else:
+        features['non_zero_min'] = 0
+        features['non_zero_mean'] = 0
+        features['non_zero_median'] = 0
+        features['non_zero_std'] = 0
+        features['non_zero_count'] = 0
+        features['non_zero_ratio'] = 0
+        features['non_zero_skewness'] = 0
+        features['non_zero_kurtosis'] = 0
+    # Calculate high-intensity island statistics (potential dots)
+    high_threshold = features['p99']
+    high_values = volume_array[volume_array >= high_threshold]
+    if len(high_values) > 0:
+        features['high_intensity_count'] = len(high_values)
+        features['high_intensity_mean'] = np.mean(high_values)
+        features['high_intensity_max'] = np.max(high_values)
+        features['high_intensity_ratio'] = len(high_values) / volume_array.size
+    else:
+        features['high_intensity_count'] = 0
+        features['high_intensity_mean'] = 0
+        features['high_intensity_max'] = 0
+        features['high_intensity_ratio'] = 0
+    # Find peaks (ignoring the zero peak if it's dominant)
+    peaks = []
+    for i in range(1, len(hist)-1):
+        if hist[i] > hist[i-1] and hist[i] > hist[i+1]:
+            # Add this peak only if it's not the zero peak
+            if abs(bin_centers[i]) > 0.01:  # Small tolerance to avoid numerical issues
+                peaks.append((bin_centers[i], hist[i]))
+    # Sort peaks by height (descending)
+    peaks.sort(key=lambda x: x[1], reverse=True)
+    # Extract info about top non-zero peaks
+    if peaks:
+        features['non_zero_peak1_value'] = peaks[0][0]
+        features['non_zero_peak1_height'] = peaks[0][1]
         
-    Returns:
-    --------
-    dict
-        Dictionary of histogram data for each method
-    """
+        if len(peaks) > 1:
+            features['non_zero_peak2_value'] = peaks[1][0]
+            features['non_zero_peak2_height'] = peaks[1][1]
+            features['non_zero_peak_distance'] = abs(features['non_zero_peak1_value'] - features['non_zero_peak2_value'])
+        else:
+            features['non_zero_peak2_value'] = features['non_zero_peak1_value']
+            features['non_zero_peak2_height'] = 0
+            features['non_zero_peak_distance'] = 0
+    else:
+        # No non-zero peaks found
+        features['non_zero_peak1_value'] = features['mean']
+        features['non_zero_peak1_height'] = 0
+        features['non_zero_peak2_value'] = features['mean']
+        features['non_zero_peak2_height'] = 0
+        features['non_zero_peak_distance'] = 0
+    # Add specialized dot detection features
+    # Contrast ratios that might help identify dots
+    features['contrast_ratio'] = features['max'] / features['mean'] if features['mean'] > 0 else 0
+    features['p99_mean_ratio'] = features['p99'] / features['mean'] if features['mean'] > 0 else 0
+    # Distance between percentiles
+    features['p75_p25'] = features['p75'] - features['p25']  # Interquartile range
+    features['p95_p5'] = np.percentile(volume_array, 95) - np.percentile(volume_array, 5)
+    features['p99_p1'] = np.percentile(volume_array, 99) - np.percentile(volume_array, 1)
+    # Entropy
+    features['entropy'] = shannon_entropy(volume_array)
+    return features
+
+def collect_histogram_data(enhanced_volumes, threshold_tracker, outputDir=None):
     import numpy as np
     import pandas as pd
     import os
@@ -115,54 +207,44 @@ def collect_histogram_data(enhanced_volumes, threshold_tracker, outputDir=None):
             'bin_centers': bin_centers
         }
         
-        # Extract features from histogram
-        hist_features[method_name] = {
-            'min': np.min(volume_array),
-            'max': np.max(volume_array),
-            'mean': np.mean(volume_array),
-            'median': np.median(volume_array),
-            'std': np.std(volume_array),
-            'p25': np.percentile(volume_array, 25),
-            'p75': np.percentile(volume_array, 75),
-            'p95': np.percentile(volume_array, 95),
-            'p99': np.percentile(volume_array, 99),
-            'entropy': shannon_entropy(volume_array),
-        }
+        # Extract advanced features (instead of basic features)
+        hist_features[method_name] = extract_advanced_features(volume_array, hist, bin_centers)
         
         # Add threshold if available
         if method_name in threshold_tracker:
             hist_features[method_name]['threshold'] = threshold_tracker[method_name]
         
-        # Plot histogram
-        plt.figure(figsize=(10, 6))
-        plt.plot(bin_centers, hist)
-        plt.title(f'Histogram for {method_name}')
-        plt.xlabel('Pixel Value')
-        plt.ylabel('Frequency')
+        # # Plot histogram
+        # plt.figure(figsize=(10, 6))
+        # plt.plot(bin_centers, hist)
+        # plt.title(f'Histogram for {method_name}')
+        # plt.xlabel('Pixel Value')
+        # plt.ylabel('Frequency')
         
-        # Add a vertical line for threshold if available
-        if method_name in threshold_tracker:
-            threshold = threshold_tracker[method_name]
-            plt.axvline(x=threshold, color='r', linestyle='--', 
-                        label=f'Threshold = {threshold}')
-            plt.legend()
+        # # Add a vertical line for threshold if available
+        # if method_name in threshold_tracker:
+        #     threshold = threshold_tracker[method_name]
+        #     plt.axvline(x=threshold, color='r', linestyle='--', 
+        #                 label=f'Threshold = {threshold}')
+        #     plt.legend()
         
-        # Save plot
-        plt.savefig(os.path.join(hist_dir, f'histogram_{method_name}.png'))
-        plt.close()
+        # # Save plot
+        # plt.savefig(os.path.join(hist_dir, f'histogram_{method_name}.png'))
+        # plt.close()
     
     # Save all histogram features to CSV
     features_df = pd.DataFrame.from_dict(hist_features, orient='index')
     features_df.to_csv(os.path.join(outputDir, 'histogram_features.csv'))
     
     # Create a comprehensive report with all histograms
-    create_histogram_report(histogram_data, threshold_tracker, outputDir)
+    create_histogram_report(histogram_data, threshold_tracker, hist_features, outputDir)
+    
     
     return histogram_data
 
-def create_histogram_report(histogram_data, threshold_tracker, outputDir):
+def create_histogram_report(histogram_data, threshold_tracker,hist_features,  outputDir):
     """
-    Create a comprehensive report with all histograms.
+    Create a comprehensive report with all histograms with improved visualization.
     
     Parameters:
     -----------
@@ -176,6 +258,8 @@ def create_histogram_report(histogram_data, threshold_tracker, outputDir):
     import matplotlib.pyplot as plt
     import os
     import numpy as np
+    from matplotlib import cm
+    from matplotlib.colors import Normalize
     
     # Create plots directory
     plots_dir = os.path.join(outputDir, "combined_plots")
@@ -193,6 +277,9 @@ def create_histogram_report(histogram_data, threshold_tracker, outputDir):
         'First Try': ['FT_gaussian', 'FT_tophat_1', 'FT_RESTA_TOPHAT_GAUSSIAN', 'FT_gamma_correction', 'FT_sharpened', 'FT_gaussian_2', 'FT_gamma_2', 'FT_opening', 'FT_closing', 'FT_erode_2', 'FT_tophat', 'FT_gaussian_3']
     }
     
+    # Define a better color palette
+    colormap = cm.get_cmap('viridis', 10)
+    
     # Plot histograms by approach
     for approach_name, methods in approaches.items():
         # Filter available methods
@@ -201,64 +288,172 @@ def create_histogram_report(histogram_data, threshold_tracker, outputDir):
         if not available_methods:
             continue
             
-        # Create plot with subplots for this approach
+        # Create plot with subplots for this approach - adaptive size based on number of methods
         num_methods = len(available_methods)
-        nrows = (num_methods + 1) // 2  # Round up to nearest integer
+        cols = min(3, num_methods)  # Maximum 3 columns
+        rows = (num_methods + cols - 1) // cols  # Ceiling division
         
-        fig, axes = plt.subplots(nrows, 2, figsize=(16, 4 * nrows))
+        # Adaptive figure size - width based on columns, height based on rows
+        fig_width = 6 * cols
+        fig_height = 4 * rows
+        
+        fig, axes = plt.subplots(rows, cols, figsize=(fig_width, fig_height))
         fig.suptitle(f'Histograms for {approach_name} Approach', fontsize=16)
         
         # Flatten axes for easy indexing
-        if nrows == 1:
-            axes = np.array([axes])
-        axes = axes.flatten()
+        if rows == 1 and cols == 1:
+            axes = np.array([[axes]])
+        elif rows == 1:
+            axes = axes.reshape(1, -1)
+        elif cols == 1:
+            axes = axes.reshape(-1, 1)
+        axes_flat = axes.flatten()
         
         # Plot each method
         for i, method in enumerate(available_methods):
-            if i < len(axes):
+            if i < len(axes_flat):
                 data = histogram_data[method]
-                axes[i].plot(data['bin_centers'], data['hist'])
-                axes[i].set_title(method)
-                axes[i].set_xlabel('Pixel Value')
-                axes[i].set_ylabel('Frequency')
+                hist = data['hist']
+                bin_centers = data['bin_centers']
+                
+                # Calculate mean and median for annotations
+                if 'mean' in hist_features[method]:
+                    mean_val = hist_features[method]['mean']
+                    median_val = hist_features[method]['median']
+                else:
+                    # Approximate from histogram if not available
+                    total = np.sum(hist)
+                    cumsum = np.cumsum(hist)
+                    median_idx = np.argmin(np.abs(cumsum - total/2))
+                    median_val = bin_centers[median_idx]
+                    mean_val = np.sum(bin_centers * hist) / total
+                
+                # Normalize histogram for better visualization
+                normalized_hist = hist / np.max(hist)
+                
+                # Plot with better styling
+                ax = axes_flat[i]
+                color = colormap(i / len(available_methods))
+                ax.plot(bin_centers, normalized_hist, color=color, linewidth=2)
+                
+                # Add semitransparent fill under curve
+                ax.fill_between(bin_centers, normalized_hist, alpha=0.3, color=color)
+                
+                # Use log scale for y-axis to better see differences
+                ax.set_yscale('log')
+                ax.set_ylim(bottom=1e-8)  # Minimum value for log scale
+                
+                # Add grid for easier reading
+                ax.grid(True, alpha=0.3, linestyle='--')
+                
+                # Set title and labels
+                ax.set_title(method, fontsize=12, fontweight='bold')
+                ax.set_xlabel('Pixel Value', fontsize=10)
+                ax.set_ylabel('Normalized Frequency (log)', fontsize=10)
                 
                 # Add threshold line if available
                 if method in threshold_tracker:
                     threshold = threshold_tracker[method]
-                    axes[i].axvline(x=threshold, color='r', linestyle='--', 
-                                  label=f'Threshold = {threshold}')
-                    axes[i].legend()
+                    ax.axvline(x=threshold, color='r', linestyle='-', 
+                               linewidth=2, label=f'Threshold = {threshold:.2f}')
+                
+                # Add mean and median lines
+                ax.axvline(x=mean_val, color='green', linestyle='--', 
+                           linewidth=1.5, label=f'Mean = {mean_val:.2f}')
+                ax.axvline(x=median_val, color='blue', linestyle=':', 
+                           linewidth=1.5, label=f'Median = {median_val:.2f}')
+                
+                # Add legend
+                ax.legend(loc='upper right', fontsize=8)
         
         # Hide unused subplots
-        for j in range(i+1, len(axes)):
-            axes[j].set_visible(False)
+        for j in range(num_methods, len(axes_flat)):
+            axes_flat[j].set_visible(False)
         
-        plt.tight_layout(rect=[0, 0, 1, 0.96])  # Adjust for suptitle
-        plt.savefig(os.path.join(plots_dir, f'histograms_{approach_name.replace(" ", "_")}.png'))
+        plt.tight_layout(rect=[0, 0, 1, 0.96])  
+        plt.subplots_adjust(hspace=0.4, wspace=0.3)  
+        plt.savefig(os.path.join(plots_dir, f'histograms_{approach_name.replace(" ", "_")}.png'), dpi=300)
         plt.close()
     
-    # Plot all thresholds in one figure
+    # Enhanced plot for comparing all methods with thresholds
     threshold_methods = [m for m in threshold_tracker.keys() if m in histogram_data]
     
     if threshold_methods:
-        # Create a large figure for all thresholds
-        plt.figure(figsize=(15, 10))
-        
-        for method in threshold_methods:
-            data = histogram_data[method]
-            plt.plot(data['bin_centers'], data['hist'] / np.max(data['hist']), label=method)  # Normalize for comparison
+        # Create two comparison plots: one regular and one with log scale
+        for scale_type in ['linear', 'log']:
+            # Determine appropriate figure size based on number of methods
+            fig_width = min(20, 12 + len(threshold_methods) * 0.5)
             
-            # Add threshold line
-            threshold = threshold_tracker[method]
-            plt.axvline(x=threshold, linestyle='--', color='gray', alpha=0.5)
+            plt.figure(figsize=(fig_width, 10))
+            
+            # Use colormap for better differentiation between methods
+            norm = Normalize(vmin=0, vmax=len(threshold_methods)-1)
+            
+            # Plot each method with distinct color
+            for i, method in enumerate(threshold_methods):
+                data = histogram_data[method]
+                # Normalize histogram
+                normalized_hist = data['hist'] / np.max(data['hist'])
+                color = colormap(norm(i))
+                
+                plt.plot(data['bin_centers'], normalized_hist, 
+                         label=method, color=color, linewidth=2)
+                
+                # Add threshold line with matching color
+                threshold = threshold_tracker[method]
+                plt.axvline(x=threshold, linestyle='--', color=color, alpha=0.7)
+                
+                # Annotate threshold value
+                plt.text(threshold, 0.5 + i*0.05, f'{method}: {threshold:.2f}', 
+                         rotation=90, fontsize=8, color=color)
+            
+            if scale_type == 'log':
+                plt.yscale('log')
+                plt.ylim(bottom=1e-8)
+                plt.title('Normalized Histograms with Thresholds (Log Scale)')
+            else:
+                plt.title('Normalized Histograms with Thresholds')
+                
+            plt.xlabel('Pixel Value', fontsize=12)
+            plt.ylabel('Normalized Frequency', fontsize=12)
+            plt.grid(True, alpha=0.3, linestyle='--')
+            
+            # Create legend with two columns if many methods
+            if len(threshold_methods) > 6:
+                ncol = 2
+            else:
+                ncol = 1
+                
+            plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left', ncol=ncol, fontsize=10)
+            plt.tight_layout()
+            plt.savefig(os.path.join(plots_dir, f'all_thresholds_comparison_{scale_type}.png'), dpi=300)
+            plt.close()
+            
+    # Create a heatmap of threshold values for quick comparison
+    if threshold_methods:
+        plt.figure(figsize=(12, len(threshold_methods)/2 + 2))
         
-        plt.title('Normalized Histograms with Thresholds')
-        plt.xlabel('Pixel Value')
-        plt.ylabel('Normalized Frequency')
-        plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
+        # Get threshold values and sort them
+        thresholds = [threshold_tracker[m] for m in threshold_methods]
+        sorted_indices = np.argsort(thresholds)
+        sorted_methods = [threshold_methods[i] for i in sorted_indices]
+        sorted_thresholds = [thresholds[i] for i in sorted_indices]
+        
+        # Create horizontal bar chart of thresholds
+        bars = plt.barh(sorted_methods, sorted_thresholds, height=0.6)
+        
+        # Add threshold values as text
+        for i, bar in enumerate(bars):
+            plt.text(bar.get_width() + 0.5, bar.get_y() + bar.get_height()/2, 
+                     f'{sorted_thresholds[i]:.2f}', 
+                     va='center', fontsize=10)
+        
+        plt.xlabel('Threshold Value', fontsize=12)
+        plt.title('Comparison of Threshold Values Across Methods', fontsize=14)
+        plt.grid(True, axis='x', alpha=0.3, linestyle='--')
         plt.tight_layout()
-        plt.savefig(os.path.join(plots_dir, 'all_thresholds_comparison.png'))
-        plt.close() 
+        plt.savefig(os.path.join(plots_dir, 'threshold_comparison_chart.png'), dpi=300)
+        plt.close()
 
 def process_original_ctp(enhanced_volumes, volume_array, threshold_tracker):
     """Process the original CTP volume with basic enhancement techniques"""
@@ -269,28 +464,30 @@ def process_original_ctp(enhanced_volumes, volume_array, threshold_tracker):
     print(f"OG_volume_array shape: {enhanced_volumes['OG_volume_array'].shape}")
     
     # Threshold original volume
-    threshold = 2296
+    threshold = 2500
     enhanced_volumes['DESCARGAR_OG_volume_array_2296'] = np.uint8(enhanced_volumes['OG_volume_array'] > threshold)
-    threshold_tracker['DESCARGAR_OG_volume_array'] = threshold
+    threshold_tracker['OG_volume_array'] = threshold
     
     # Gaussian filter on original volume
     enhanced_volumes['OG_gaussian_volume_og'] = gaussian(enhanced_volumes['OG_volume_array'], sigma=0.3)
+    threshold = 2386
+    enhanced_volumes['DESCARGAR_OG_gaussian_volume_og_2386'] = np.uint8(enhanced_volumes['OG_gaussian_volume_og'] > threshold)
+    threshold_tracker['OG_gaussian_volume_og'] = threshold
     
     # Gamma correction on gaussian filtered volume
     enhanced_volumes['OG_gamma_volume_og'] = gamma_correction(enhanced_volumes['OG_gaussian_volume_og'], gamma=3)
     
     # Threshold gamma corrected volume
-    threshold = 164
+    threshold = 168
     enhanced_volumes['DESCARGAR_OG_gamma_volume_og_164'] = np.uint8(enhanced_volumes['OG_gamma_volume_og'] > threshold)
-    threshold_tracker['DESCARGAR_OG_gamma_volume_og'] = threshold
+    threshold_tracker['OG_gamma_volume_og'] = threshold
     
     # Sharpen gamma corrected volume
     enhanced_volumes['OG_sharpened'] = sharpen_high_pass(enhanced_volumes['OG_gamma_volume_og'], strenght=0.8)
-    
     # Threshold sharpened volume
-    threshold = 167
+    threshold = 178
     enhanced_volumes['DESCARGAR_OG_sharpened_167'] = np.uint8(enhanced_volumes['OG_sharpened'] > threshold)
-    threshold_tracker['DESCARGAR_OG_sharpened'] = threshold
+    threshold_tracker['OG_sharpened'] = threshold
     
     return enhanced_volumes, threshold_tracker
 
@@ -309,30 +506,25 @@ def process_roi_gamma_mask(enhanced_volumes, final_roi, volume_array, threshold_
     
     # Combine ROI mask with gamma corrected volume
     enhanced_volumes['PRUEBA_roi_plus_gamma_mask'] = (final_roi > 0) * enhanced_volumes['OG_gamma_volume_og']
-    
     # Threshold ROI plus gamma mask
-    threshold = 178
-    enhanced_volumes['DESCARGAR_PRUEBA_roi_plus_gamma_mask_178'] = np.uint8(enhanced_volumes['PRUEBA_roi_plus_gamma_mask'] > threshold)
-    threshold_tracker['DESCARGAR_PRUEBA_roi_plus_gamma_mask'] = threshold
+    threshold = 123
+    enhanced_volumes['DESCARGAR_PRUEBA_roi_plus_gamma_mask_123'] = np.uint8(enhanced_volumes['PRUEBA_roi_plus_gamma_mask'] > threshold)
+    threshold_tracker['PRUEBA_roi_plus_gamma_mask'] = threshold
     
     # Apply CLAHE to ROI plus gamma mask
     enhanced_volumes['PRUEBA_roi_plus_gamma_mask_clahe'] = apply_clahe(enhanced_volumes['PRUEBA_roi_plus_gamma_mask'])
-    
     # Threshold CLAHE result
-    threshold = 175
-    enhanced_volumes['DESCARGAR_PRUEBA_THRESHOLD_CLAHE_175'] = np.uint8(enhanced_volumes['PRUEBA_roi_plus_gamma_mask_clahe'] > threshold)
-    threshold_tracker['DESCARGAR_PRUEBA_THRESHOLD_CLAHE'] = threshold
+    threshold = 158
+    enhanced_volumes['DESCARGAR_PRUEBA_THRESHOLD_CLAHE_158'] = np.uint8(enhanced_volumes['PRUEBA_roi_plus_gamma_mask_clahe'] > threshold)
+    threshold_tracker['PRUEBA_roi_plus_gamma_mask_clahe'] = threshold
     
-    # Save final ROI
-    enhanced_volumes['Prueba_final_roi'] = final_roi
-    
+
     # Apply wavelet non-local means denoising
     enhanced_volumes['PRUEBA_WAVELET_NL'] = wavelet_nlm_denoise(enhanced_volumes['PRUEBA_roi_plus_gamma_mask'], wavelet='db1')
-    
     # Threshold wavelet NL denoised volume
-    threshold = 182
-    enhanced_volumes['DESCARGAR_PRUEBA_WAVELET_NL'] = np.uint8(enhanced_volumes['PRUEBA_WAVELET_NL'] > threshold)
-    threshold_tracker['DESCARGAR_PRUEBA_WAVELET_NL'] = threshold
+    threshold = 145
+    enhanced_volumes['DESCARGAR_PRUEBA_WAVELET_NL_145'] = np.uint8(enhanced_volumes['PRUEBA_WAVELET_NL'] > threshold)
+    threshold_tracker['PRUEBA_WAVELET_NL'] = threshold
     
     return enhanced_volumes, threshold_tracker
 
@@ -346,33 +538,21 @@ def process_roi_only(enhanced_volumes, roi_volume, final_roi, threshold_tracker)
     
     # Apply wavelet denoising
     enhanced_volumes['wavelet_only_roi'] = wavelet_denoise(enhanced_volumes['roi_volume'], wavelet='db1')
+    threshold= 1766
+    enhanced_volumes['DESCARGAR_WAVELET_ROI_1766'] = np.uint8(enhanced_volumes['wavelet_only_roi'] > threshold)
+    threshold_tracker['wavelet_only_roi'] = threshold
+
     
     # Apply gamma correction to wavelet denoised volume
     enhanced_volumes['gamma_only_roi'] = gamma_correction(enhanced_volumes['wavelet_only_roi'], gamma=0.8)
-    
-    # Sharpen wavelet denoised volume
-    enhanced_volumes['sharpened_wavelet_roi'] = sharpen_high_pass(enhanced_volumes['wavelet_only_roi'], strenght=0.5)
-    
-    # Sharpen ROI volume
-    enhanced_volumes['sharpened_roi_only_roi'] = sharpen_high_pass(enhanced_volumes['roi_volume'], strenght=0.8)
-    
-    # Apply log transform
-    enhanced_volumes['LOG_roi'] = log_transform_slices(enhanced_volumes['sharpened_roi_only_roi'], c=3)
+    threshold = 200
+    enhanced_volumes['DESCARGAR_GAMMA_ONLY_ROI_200'] = np.uint8(enhanced_volumes['gamma_only_roi'] > threshold)
+    threshold_tracker['gamma_only_roi'] = threshold
     
     # Threshold ROI volume
-    threshold = 2346
-    enhanced_volumes['DESCARGAR_Threshold_roi_volume_2346'] = np.uint8(enhanced_volumes['roi_volume'] > threshold)
-    threshold_tracker['DESCARGAR_Threshold_roi_volume'] = threshold
-    
-    # Threshold wavelet denoised volume
-    threshold = 2626
-    enhanced_volumes['DESCARGAR_WAVELET_ROI_2626'] = np.uint8(enhanced_volumes['roi_volume'] > threshold)
-    threshold_tracker['DESCARGAR_WAVELET_ROI'] = threshold
-    
-    # Threshold gamma corrected volume
-    threshold = 217
-    enhanced_volumes['DESCARGAR_GAMMA_ONLY_ROI'] = np.uint8(enhanced_volumes['gamma_only_roi'] > threshold)
-    threshold_tracker['DESCARGAR_GAMMA_ONLY_ROI'] = threshold
+    threshold = 2206
+    enhanced_volumes['DESCARGAR_Threshold_roi_volume_2206'] = np.uint8(enhanced_volumes['roi_volume'] > threshold)
+    threshold_tracker['roi_volume'] = threshold
     
     return enhanced_volumes, threshold_tracker
 
@@ -389,72 +569,67 @@ def process_roi_plus_gamma_after(enhanced_volumes, final_roi, threshold_tracker)
         return enhanced_volumes, threshold_tracker
     
     enhanced_volumes['2_gaussian_volume_roi'] = gaussian(enhanced_volumes['PRUEBA_roi_plus_gamma_mask'], sigma=0.3)
-    
     # Threshold gaussian volume
-    threshold = 0.00000008
-    enhanced_volumes['DESCARGAR_2_gaussian_volume_roi_0.00000008'] = np.uint8(enhanced_volumes['2_gaussian_volume_roi'] > threshold)
-    threshold_tracker['DESCARGAR_2_gaussian_volume_roi'] = threshold
+    threshold = 0.670
+    enhanced_volumes['DESCARGAR_2_gaussian_volume_roi_0.670'] = np.uint8(enhanced_volumes['2_gaussian_volume_roi'] > threshold)
+    threshold_tracker['2_gaussian_volume_roi'] = threshold
     
     # Apply gamma correction
     enhanced_volumes['2_gamma_correction'] = gamma_correction(enhanced_volumes['2_gaussian_volume_roi'], gamma=0.8)
-    
     # Threshold gamma corrected volume
-    threshold = 214
-    enhanced_volumes['DESCARGAR_2_gamma_correction_214'] = np.uint8(enhanced_volumes['2_gamma_correction'] > threshold)
-    threshold_tracker['DESCARGAR_2_gamma_correction'] = threshold
+    threshold = 164
+    enhanced_volumes['DESCARGAR_2_gamma_correction_164'] = np.uint8(enhanced_volumes['2_gamma_correction'] > threshold)
+    threshold_tracker['2_gamma_correction'] = threshold
     
     # Apply top-hat transformation
     kernel_2 = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (1, 1))
     tophat_2 = cv2.morphologyEx(enhanced_volumes['2_gaussian_volume_roi'], cv2.MORPH_TOPHAT, kernel_2)
     enhanced_volumes['2_tophat'] = cv2.addWeighted(enhanced_volumes['2_gaussian_volume_roi'], 1, tophat_2, 2, 0)
-    
     # Threshold top-hat result
-    threshold = 0.000000083
-    enhanced_volumes['DESCARGAR_2_tophat_0.000000083'] = np.uint8(enhanced_volumes['2_tophat'] > threshold)
-    threshold_tracker['DESCARGAR_2_tophat'] = threshold
+    threshold = 0.650
+    enhanced_volumes['DESCARGAR_2_tophat_0.650'] = np.uint8(enhanced_volumes['2_tophat'] > threshold)
+    threshold_tracker['2_tophat'] = threshold
     
     # Sharpen gamma corrected volume
     enhanced_volumes['2_sharpened'] = sharpen_high_pass(enhanced_volumes['2_gamma_correction'], strenght=0.8)
-    
     # Threshold sharpened volume
-    threshold = 199
-    enhanced_volumes['DESCARGAR_2_sharpened_199'] = np.uint8(enhanced_volumes['2_sharpened'] > threshold)
-    threshold_tracker['DESCARGAR_2_sharpened'] = threshold
+    threshold = 172
+    enhanced_volumes['DESCARGAR_2_sharpened_172'] = np.uint8(enhanced_volumes['2_sharpened'] > threshold)
+    threshold_tracker['2_sharpened'] = threshold
     
     # Apply LOG transform
     enhanced_volumes['2_LOG'] = log_transform_slices(enhanced_volumes['2_tophat'], c=3)
-    
     # Threshold LOG transform
-    threshold = 199
-    enhanced_volumes['DESCARGAR_2_LOG_199'] = np.uint8(enhanced_volumes['2_LOG'] > threshold)
-    threshold_tracker['DESCARGAR_2_LOG'] = threshold
+    threshold = 149
+    enhanced_volumes['DESCARGAR_2_LOG_149'] = np.uint8(enhanced_volumes['2_LOG'] > threshold)
+    threshold_tracker['2_LOG'] = threshold
     
     # Apply wavelet denoising
     enhanced_volumes['2_wavelet_roi'] = wavelet_denoise(enhanced_volumes['2_LOG'], wavelet='db4')
-    
     # Threshold wavelet result
-    threshold = 154
+    threshold = 155
     enhanced_volumes['DESCARGAR_2_wavelet_roi_154'] = np.uint8(enhanced_volumes['2_wavelet_roi'] > threshold)
-    threshold_tracker['DESCARGAR_2_wavelet_roi'] = threshold
+    threshold_tracker['2_wavelet_roi'] = threshold
     
     # Apply erosion
     enhanced_volumes['2_erode'] = morphological_operation(enhanced_volumes['2_sharpened'], operation='erode', kernel_size=1)
-    
     # Threshold eroded volume
-    threshold = 207
-    enhanced_volumes['DESCARGAR_2__207'] = np.uint8(enhanced_volumes['2_erode'] > threshold)
-    threshold_tracker['DESCARGAR_2_erode'] = threshold
+    threshold = 170
+    enhanced_volumes['DESCARGAR_2__170'] = np.uint8(enhanced_volumes['2_erode'] > threshold)
+    threshold_tracker['2_erode'] = threshold
     
     # Apply gaussian filter
     enhanced_volumes['2_gaussian_2'] = gaussian(enhanced_volumes['2_erode'], sigma=0.2)
+    threshold = 0.645
+    enhanced_volumes['DESCARGAR_2_gaussian_2_0.645'] = np.uint8(enhanced_volumes['2_gaussian_2'] > threshold)
+    threshold_tracker['2_gaussian_2'] = threshold
     
     # Sharpen gaussian filtered volume
     enhanced_volumes['2_sharpening_2_trial'] = sharpen_high_pass(enhanced_volumes['2_gaussian_2'], strenght=0.8)
-    
     # Threshold sharpened volume
-    threshold = 0.789
-    enhanced_volumes['DESCARGAR_2_sharpening_2_trial_0.789'] = np.uint8(enhanced_volumes['2_sharpening_2_trial'] > threshold)
-    threshold_tracker['DESCARGAR_2_sharpening_2_trial'] = threshold
+    threshold = 0.642
+    enhanced_volumes['DESCARGAR_2_sharpening_2_trial_0.642'] = np.uint8(enhanced_volumes['2_sharpening_2_trial'] > threshold)
+    threshold_tracker['2_sharpening_2_trial'] = threshold
     
     return enhanced_volumes, threshold_tracker
 
@@ -465,12 +640,10 @@ def process_wavelet_roi(enhanced_volumes, roi_volume, threshold_tracker):
     
     # Apply non-local means denoising with wavelet
     enhanced_volumes['NUEVO_NLMEANS'] = wavelet_nlm_denoise(roi_volume)
-    
     # Threshold NL means denoised volume
-    threshold = 2226
-    enhanced_volumes['DESCARGAR_NUEVO_NLMEANS_2226'] = np.uint8(enhanced_volumes['NUEVO_NLMEANS'] > threshold)
-    threshold_tracker['DESCARGAR_NUEVO_NLMEANS'] = threshold
-    
+    threshold = 1926
+    enhanced_volumes['DESCARGAR_NUEVO_NLMEANS_1926'] = np.uint8(enhanced_volumes['NUEVO_NLMEANS'] > threshold)
+    threshold_tracker['NUEVO_NLMEANS'] = threshold
     return enhanced_volumes, threshold_tracker
 
 
@@ -486,60 +659,55 @@ def process_original_idea(enhanced_volumes, threshold_tracker):
     
     # Apply gaussian filter
     enhanced_volumes['ORGINAL_IDEA_gaussian'] = gaussian(enhanced_volumes['PRUEBA_roi_plus_gamma_mask'], sigma=0.3)
+    threshold = 0.576
+    enhanced_volumes['DESCARGAR_ORGINAL_IDEA_gaussian_0.576'] = np.uint8(enhanced_volumes['ORGINAL_IDEA_gaussian'] > threshold)
+    threshold_tracker['ORGINAL_IDEA_gaussian'] = threshold
     
     # Apply gamma correction
     enhanced_volumes['ORGINAL_IDEA_gamma_correction'] = gamma_correction(enhanced_volumes['ORGINAL_IDEA_gaussian'], gamma=2)
-    
     # Threshold gamma corrected volume
-    threshold = 164
-    enhanced_volumes['DESCARGAR_ORGINAL_IDEA_gamma_correction_164)'] = np.uint8(enhanced_volumes['ORGINAL_IDEA_gamma_correction'] > threshold)
-    threshold_tracker['DESCARGAR_ORGINAL_IDEA_gamma_correction'] = threshold
+    threshold = 112
+    enhanced_volumes['DESCARGAR_ORGINAL_IDEA_gamma_correction_112)'] = np.uint8(enhanced_volumes['ORGINAL_IDEA_gamma_correction'] > threshold)
+    threshold_tracker['ORGINAL_IDEA_gamma_correction'] = threshold
     
     # Sharpen gamma corrected volume
     enhanced_volumes['ORGINAL_IDEA_sharpened'] = sharpen_high_pass(enhanced_volumes['ORGINAL_IDEA_gamma_correction'], strenght=0.8)
-    
     # Threshold sharpened volume
-    threshold = 141
-    enhanced_volumes['DESCARGAR_ORGINAL_IDEA_sharpened_141'] = np.uint8(enhanced_volumes['ORGINAL_IDEA_sharpened'] > threshold)
-    threshold_tracker['DESCARGAR_ORGINAL_IDEA_sharpened'] = threshold
+    threshold = 110
+    enhanced_volumes['DESCARGAR_ORGINAL_IDEA_sharpened_110'] = np.uint8(enhanced_volumes['ORGINAL_IDEA_sharpened'] > threshold)
+    threshold_tracker['ORGINAL_IDEA_sharpened'] = threshold
     
-    # Apply opening operation
-    enhanced_volumes['ORIGINAL_IDEA_SHARPENED_OPENING'] = morph_operations(enhanced_volumes['DESCARGAR_ORGINAL_IDEA_sharpened_141'], operation='open', kernel_shape='cross', kernel_size=1)
-    
+
     # Apply wavelet denoising
     enhanced_volumes['ORIGINAL_IDEA_wavelet'] = wavelet_denoise(enhanced_volumes['ORGINAL_IDEA_sharpened'])
-    
     # Threshold wavelet result
     threshold = 127
     enhanced_volumes['DESCARGAR_ORIGINAL_IDEA_wavelet_127'] = np.uint8(enhanced_volumes['ORIGINAL_IDEA_wavelet'] > threshold)
-    threshold_tracker['DESCARGAR_ORIGINAL_IDEA_wavelet'] = threshold
+    threshold_tracker['ORIGINAL_IDEA_wavelet'] = threshold
     
     # Apply gaussian filter
     enhanced_volumes['ORGINAL_IDEA_gaussian_2'] = gaussian(enhanced_volumes['ORGINAL_IDEA_sharpened'], sigma=0.4)
-    
     # Threshold gaussian filtered volume
-    threshold = 0.563
-    enhanced_volumes['DESCARGAR_ORGINAL_IDEA_gaussian_2_0.563'] = np.uint8(enhanced_volumes['ORGINAL_IDEA_gaussian_2'] > threshold)
-    threshold_tracker['DESCARGAR_ORGINAL_IDEA_gaussian_2'] = threshold
+    threshold = 0.459
+    enhanced_volumes['DESCARGAR_ORGINAL_IDEA_gaussian_2_0.459'] = np.uint8(enhanced_volumes['ORGINAL_IDEA_gaussian_2'] > threshold)
+    threshold_tracker['ORGINAL_IDEA_gaussian_2'] = threshold
     
     # Apply gamma correction
     enhanced_volumes['ORIGINAL_IDEA_GAMMA_2'] = gamma_correction(enhanced_volumes['ORGINAL_IDEA_gaussian_2'], gamma=1.4)
-    
     # Threshold gamma corrected volume
-    threshold = 132
+    threshold = 111
     enhanced_volumes['DESCARGAR_ORIGINAL_IDEA_GAMMA_2_132'] = np.uint8(enhanced_volumes['ORIGINAL_IDEA_GAMMA_2'] > threshold)
-    threshold_tracker['DESCARGAR_ORIGINAL_IDEA_GAMMA_2'] = threshold
+    threshold_tracker['ORIGINAL_IDEA_GAMMA_2'] = threshold
     
     # Apply top-hat transformation
     kernel_size_og = (1, 1)
     kernel_og = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, kernel_size_og)
     tophat_og = cv2.morphologyEx(enhanced_volumes['ORGINAL_IDEA_gaussian_2'], cv2.MORPH_TOPHAT, kernel_og)
     enhanced_volumes['OG_tophat_1'] = cv2.addWeighted(enhanced_volumes['ORGINAL_IDEA_gaussian_2'], 1, tophat_og, 2, 0)
-    
     # Threshold top-hat result
-    threshold = 0.538
+    threshold = 0.342
     enhanced_volumes['DESCARGAR_OG_tophat_1_0.538'] = np.uint8(enhanced_volumes['OG_tophat_1'] > threshold)
-    threshold_tracker['DESCARGAR_OG_tophat_1'] = threshold
+    threshold_tracker['OG_tophat_1'] = threshold
     
     return enhanced_volumes, threshold_tracker
 
@@ -550,71 +718,85 @@ def process_first_try(enhanced_volumes, roi_volume, threshold_tracker):
     
     # Apply gaussian filter
     enhanced_volumes['FT_gaussian'] = gaussian(roi_volume, sigma=0.3)
+    threshold = 2059
+    enhanced_volumes['DESCARGAR_FT_gaussian_2059'] = np.uint8(enhanced_volumes['FT_gaussian'] > threshold)
+    threshold_tracker['FT_gaussian'] = threshold
     
     # Apply top-hat transformation
     kernel_size = (1, 1)
     kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, kernel_size)
     tophat_ft = cv2.morphologyEx(roi_volume, cv2.MORPH_TOPHAT, kernel)
     enhanced_volumes['FT_tophat_1'] = cv2.addWeighted(roi_volume, 1, tophat_ft, 2, 0)
-    
     # Subtract gaussian from top-hat
     enhanced_volumes['FT_RESTA_TOPHAT_GAUSSIAN'] = enhanced_volumes['FT_tophat_1'] - gaussian(roi_volume, sigma=0.8)
-    
     # Threshold subtracted volume
-    threshold = 1516
-    enhanced_volumes['DESCARGAR_FT_RESTA_TOPHAT_GAUSSIAN_1516'] = np.uint(enhanced_volumes['FT_RESTA_TOPHAT_GAUSSIAN'] > threshold)
-    threshold_tracker['DESCARGAR_FT_RESTA_TOPHAT_GAUSSIAN'] = threshold
+    threshold = 1216
+    enhanced_volumes['DESCARGAR_FT_RESTA_TOPHAT_GAUSSIAN_1216'] = np.uint(enhanced_volumes['FT_RESTA_TOPHAT_GAUSSIAN'] > threshold)
+    threshold_tracker['FT_RESTA_TOPHAT_GAUSSIAN'] = threshold
     
     # Apply gamma correction
     enhanced_volumes['FT_gamma_correction'] = gamma_correction(enhanced_volumes['FT_gaussian'], gamma=5)
+    threshold = 106
+    enhanced_volumes['DESCARGAR_FT_gamma_correction_106'] = np.uint8(enhanced_volumes['FT_gamma_correction'] > threshold)
+    threshold_tracker['FT_gamma_correction'] = threshold
+
     
     # Sharpen gamma corrected volume
     enhanced_volumes['FT_sharpened'] = sharpen_high_pass(enhanced_volumes['FT_gamma_correction'], strenght=0.4)
-    
-    # Threshold sharpened volume
-    threshold = 146
-    enhanced_volumes['DESCARGAR_FT_sharpened_146'] = np.uint8(enhanced_volumes['FT_sharpened'] > threshold)
-    threshold_tracker['DESCARGAR_FT_sharpened'] = threshold
+    threshold= 120
+    enhanced_volumes['DESCARGAR_FT_sharpened_120'] = np.uint8(enhanced_volumes['FT_sharpened'] > threshold)
+    threshold_tracker['FT_sharpened'] = threshold
+
     
     # Apply gaussian filter
     enhanced_volumes['FT_gaussian_2'] = gaussian(enhanced_volumes['FT_sharpened'], sigma=0.4)
-    
     # Threshold gaussian filtered volume
-    threshold = 0.482
-    enhanced_volumes['DESCARGAR_FT_gaussian_2_0.482'] = np.uint8(enhanced_volumes['FT_gaussian_2'] > threshold)
-    threshold_tracker['DESCARGAR_FT_gaussian_2'] = threshold
+    threshold = 0.435
+    enhanced_volumes['DESCARGAR_FT_gaussian_2_0.435'] = np.uint8(enhanced_volumes['FT_gaussian_2'] > threshold)
+    threshold_tracker['FT_gaussian_2'] = threshold
     
     # Apply gamma correction
     enhanced_volumes['FT_gamma_2'] = gamma_correction(enhanced_volumes['FT_gaussian_2'], gamma=1.2)
-    
     # Threshold gamma corrected volume
     threshold = 106
     enhanced_volumes['DESCARGAR_FT_GAMMA_2_106'] = np.uint8(enhanced_volumes['FT_gamma_2'] > threshold)
-    threshold_tracker['DESCARGAR_FT_GAMMA_2'] = threshold
+    threshold_tracker['FT_gamma_2'] = threshold
+
     # Apply opening operation
     enhanced_volumes['FT_opening'] = morph_operations(enhanced_volumes['FT_gamma_2'], iterations=2, kernel_shape='cross')
+    threshold = 109
+    enhanced_volumes['DESCARGAR_FT_OPENING_109'] = np.uint8(enhanced_volumes['FT_opening'] > threshold)
+    threshold_tracker['FT_opening'] = threshold
+
+    
     # Apply closing operation
     enhanced_volumes['FT_closing'] = morph_operations(enhanced_volumes['FT_opening'], operation='close')
+    threshold = 88
+    enhanced_volumes['DESCARGAR_FT_CLOSING_88'] = np.uint8(enhanced_volumes['FT_closing'] > threshold)
+    threshold_tracker['FT_closing'] = threshold
+
     # Apply erosion
     enhanced_volumes['FT_erode_2'] = morphological_operation(enhanced_volumes['FT_closing'], operation='erode', kernel_size=1)
     # Threshold eroded volume
-    threshold = 133
-    enhanced_volumes['DESCARGAR_FT_ERODE_2_133'] = np.uint8(enhanced_volumes['FT_erode_2'] > threshold)
-    threshold_tracker['DESCARGAR_FT_ERODE_2'] = threshold
+    threshold = 101
+    enhanced_volumes['DESCARGAR_FT_ERODE_2_101'] = np.uint8(enhanced_volumes['FT_erode_2'] > threshold)
+    threshold_tracker['FT_erode_2'] = threshold
+    
     # Apply top-hat transformation
     kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (1, 1))
     tophat = cv2.morphologyEx(enhanced_volumes['FT_gaussian_2'], cv2.MORPH_TOPHAT, kernel)
     enhanced_volumes['FT_tophat'] = cv2.addWeighted(enhanced_volumes['FT_gaussian_2'], 1, tophat, 2, 0)
     # Threshold top-hat result
-    threshold = 0.490
-    enhanced_volumes['DESCARGAR_FT_TOPHAT_0.490'] = np.uint8(enhanced_volumes['FT_tophat'] > threshold)
-    threshold_tracker['DESCARGAR_FT_TOPHAT'] = threshold
+    threshold = 0.371
+    enhanced_volumes['DESCARGAR_FT_TOPHAT_0.371'] = np.uint8(enhanced_volumes['FT_tophat'] > threshold)
+    threshold_tracker['FT_tophat'] = threshold
+    
     # Apply gaussian filter
     enhanced_volumes['FT_gaussian_3'] = gaussian(enhanced_volumes['FT_tophat'], sigma=0.1)
     # Threshold gaussian filtered volume
-    threshold = 0.540
+    threshold = 0.298
     enhanced_volumes['DESCARGAR_FT_gaussian_3_0.540'] = np.uint8(enhanced_volumes['FT_gaussian_3'] > threshold)
-    threshold_tracker['DESCARGAR_FT_gaussian_3'] = threshold
+    threshold_tracker['FT_gaussian_3'] = threshold
     return enhanced_volumes, threshold_tracker
 
 
@@ -775,7 +957,7 @@ def enhance_ctp(inputVolume, inputROI=None, methods=None, outputDir=None, collec
 inputVolume = slicer.util.getNode('CTp.3D')  
 inputROI = slicer.util.getNode('patient2_mask_5')  # Brain Mask 
 # Output directory
-outputDir = r"C:\Users\rocia\Downloads\TFG\Cohort\Enhance_ctp_tests\P2\TH45_new_histogram"
+outputDir = r"C:\Users\rocia\Downloads\TFG\Cohort\Enhance_ctp_tests\P2\TH45_histograms"
 # Run the enhancement function
 enhancedVolumeNodes = enhance_ctp(inputVolume, inputROI, methods='all', outputDir=outputDir, collect_histograms=True, train_model=False)
 # Print the enhanced volume nodes

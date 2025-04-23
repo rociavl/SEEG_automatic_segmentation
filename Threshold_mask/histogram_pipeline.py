@@ -1,3 +1,14 @@
+
+def shannon_entropy(image):
+    """Calculate Shannon entropy of an image."""
+    import numpy as np
+    # Convert to probabilities by calculating histogram
+    hist, _ = np.histogram(image, bins=256, density=True)
+    # Remove zeros to avoid log(0)
+    hist = hist[hist > 0]
+    # Calculate entropy
+    return -np.sum(hist * np.log2(hist))
+
 def collect_histogram_data(enhanced_volumes, threshold_tracker, outputDir=None):
     """
     Collect histogram data for each enhanced volume and save as CSV.
@@ -60,7 +71,7 @@ def collect_histogram_data(enhanced_volumes, threshold_tracker, outputDir=None):
             'p75': np.percentile(volume_array, 75),
             'p95': np.percentile(volume_array, 95),
             'p99': np.percentile(volume_array, 99),
-            'entropy': exposure.shannon_entropy(volume_array),
+            'entropy': shannon_entropy(volume_array),
         }
         
         # Add threshold if available
@@ -90,13 +101,13 @@ def collect_histogram_data(enhanced_volumes, threshold_tracker, outputDir=None):
     features_df.to_csv(os.path.join(outputDir, 'histogram_features.csv'))
     
     # Create a comprehensive report with all histograms
-    create_histogram_report(histogram_data, threshold_tracker, outputDir)
+    create_histogram_report(histogram_data, threshold_tracker, hist_features, outputDir)
     
     return histogram_data
 
-def create_histogram_report(histogram_data, threshold_tracker, outputDir):
+def create_histogram_report(histogram_data, threshold_tracker,hist_features,  outputDir):
     """
-    Create a comprehensive report with all histograms.
+    Create a comprehensive report with all histograms with improved visualization.
     
     Parameters:
     -----------
@@ -110,6 +121,8 @@ def create_histogram_report(histogram_data, threshold_tracker, outputDir):
     import matplotlib.pyplot as plt
     import os
     import numpy as np
+    from matplotlib import cm
+    from matplotlib.colors import Normalize
     
     # Create plots directory
     plots_dir = os.path.join(outputDir, "combined_plots")
@@ -127,6 +140,9 @@ def create_histogram_report(histogram_data, threshold_tracker, outputDir):
         'First Try': ['FT_gaussian', 'FT_tophat_1', 'FT_RESTA_TOPHAT_GAUSSIAN', 'FT_gamma_correction', 'FT_sharpened', 'FT_gaussian_2', 'FT_gamma_2', 'FT_opening', 'FT_closing', 'FT_erode_2', 'FT_tophat', 'FT_gaussian_3']
     }
     
+    # Define a better color palette
+    colormap = cm.get_cmap('viridis', 10)
+    
     # Plot histograms by approach
     for approach_name, methods in approaches.items():
         # Filter available methods
@@ -135,149 +151,169 @@ def create_histogram_report(histogram_data, threshold_tracker, outputDir):
         if not available_methods:
             continue
             
-        # Create plot with subplots for this approach
+        # Create plot with subplots for this approach - adaptive size based on number of methods
         num_methods = len(available_methods)
-        nrows = (num_methods + 1) // 2  # Round up to nearest integer
+        cols = min(3, num_methods)  # Maximum 3 columns
+        rows = (num_methods + cols - 1) // cols  # Ceiling division
         
-        fig, axes = plt.subplots(nrows, 2, figsize=(16, 4 * nrows))
+        # Adaptive figure size - width based on columns, height based on rows
+        fig_width = 6 * cols
+        fig_height = 4 * rows
+        
+        fig, axes = plt.subplots(rows, cols, figsize=(fig_width, fig_height))
         fig.suptitle(f'Histograms for {approach_name} Approach', fontsize=16)
         
         # Flatten axes for easy indexing
-        if nrows == 1:
-            axes = np.array([axes])
-        axes = axes.flatten()
+        if rows == 1 and cols == 1:
+            axes = np.array([[axes]])
+        elif rows == 1:
+            axes = axes.reshape(1, -1)
+        elif cols == 1:
+            axes = axes.reshape(-1, 1)
+        axes_flat = axes.flatten()
         
         # Plot each method
         for i, method in enumerate(available_methods):
-            if i < len(axes):
+            if i < len(axes_flat):
                 data = histogram_data[method]
-                axes[i].plot(data['bin_centers'], data['hist'])
-                axes[i].set_title(method)
-                axes[i].set_xlabel('Pixel Value')
-                axes[i].set_ylabel('Frequency')
+                hist = data['hist']
+                bin_centers = data['bin_centers']
+                
+                # Calculate mean and median for annotations
+                if 'mean' in hist_features[method]:
+                    mean_val = hist_features[method]['mean']
+                    median_val = hist_features[method]['median']
+                else:
+                    # Approximate from histogram if not available
+                    total = np.sum(hist)
+                    cumsum = np.cumsum(hist)
+                    median_idx = np.argmin(np.abs(cumsum - total/2))
+                    median_val = bin_centers[median_idx]
+                    mean_val = np.sum(bin_centers * hist) / total
+                
+                # Normalize histogram for better visualization
+                normalized_hist = hist / np.max(hist)
+                
+                # Plot with better styling
+                ax = axes_flat[i]
+                color = colormap(i / len(available_methods))
+                ax.plot(bin_centers, normalized_hist, color=color, linewidth=2)
+                
+                # Add semitransparent fill under curve
+                ax.fill_between(bin_centers, normalized_hist, alpha=0.3, color=color)
+                
+                # Use log scale for y-axis to better see differences
+                ax.set_yscale('log')
+                ax.set_ylim(bottom=0.001)  # Minimum value for log scale
+                
+                # Add grid for easier reading
+                ax.grid(True, alpha=0.3, linestyle='--')
+                
+                # Set title and labels
+                ax.set_title(method, fontsize=12, fontweight='bold')
+                ax.set_xlabel('Pixel Value', fontsize=10)
+                ax.set_ylabel('Normalized Frequency (log)', fontsize=10)
                 
                 # Add threshold line if available
                 if method in threshold_tracker:
                     threshold = threshold_tracker[method]
-                    axes[i].axvline(x=threshold, color='r', linestyle='--', 
-                                  label=f'Threshold = {threshold}')
-                    axes[i].legend()
+                    ax.axvline(x=threshold, color='r', linestyle='-', 
+                               linewidth=2, label=f'Threshold = {threshold:.2f}')
+                
+                # Add mean and median lines
+                ax.axvline(x=mean_val, color='green', linestyle='--', 
+                           linewidth=1.5, label=f'Mean = {mean_val:.2f}')
+                ax.axvline(x=median_val, color='blue', linestyle=':', 
+                           linewidth=1.5, label=f'Median = {median_val:.2f}')
+                
+                # Add legend
+                ax.legend(loc='upper right', fontsize=8)
         
         # Hide unused subplots
-        for j in range(i+1, len(axes)):
-            axes[j].set_visible(False)
+        for j in range(num_methods, len(axes_flat)):
+            axes_flat[j].set_visible(False)
         
         plt.tight_layout(rect=[0, 0, 1, 0.96])  # Adjust for suptitle
-        plt.savefig(os.path.join(plots_dir, f'histograms_{approach_name.replace(" ", "_")}.png'))
+        plt.subplots_adjust(hspace=0.4, wspace=0.3)  # Add space between subplots
+        plt.savefig(os.path.join(plots_dir, f'histograms_{approach_name.replace(" ", "_")}.png'), dpi=300)
         plt.close()
     
-    # Plot all thresholds in one figure
+    # Enhanced plot for comparing all methods with thresholds
     threshold_methods = [m for m in threshold_tracker.keys() if m in histogram_data]
     
     if threshold_methods:
-        # Create a large figure for all thresholds
-        plt.figure(figsize=(15, 10))
-        
-        for method in threshold_methods:
-            data = histogram_data[method]
-            plt.plot(data['bin_centers'], data['hist'] / np.max(data['hist']), label=method)  # Normalize for comparison
+        # Create two comparison plots: one regular and one with log scale
+        for scale_type in ['linear', 'log']:
+            # Determine appropriate figure size based on number of methods
+            fig_width = min(20, 12 + len(threshold_methods) * 0.5)
             
-            # Add threshold line
-            threshold = threshold_tracker[method]
-            plt.axvline(x=threshold, linestyle='--', color='gray', alpha=0.5)
+            plt.figure(figsize=(fig_width, 10))
+            
+            # Use colormap for better differentiation between methods
+            norm = Normalize(vmin=0, vmax=len(threshold_methods)-1)
+            
+            # Plot each method with distinct color
+            for i, method in enumerate(threshold_methods):
+                data = histogram_data[method]
+                # Normalize histogram
+                normalized_hist = data['hist'] / np.max(data['hist'])
+                color = colormap(norm(i))
+                
+                plt.plot(data['bin_centers'], normalized_hist, 
+                         label=method, color=color, linewidth=2)
+                
+                # Add threshold line with matching color
+                threshold = threshold_tracker[method]
+                plt.axvline(x=threshold, linestyle='--', color=color, alpha=0.7)
+                
+                # Annotate threshold value
+                plt.text(threshold, 0.5 + i*0.05, f'{method}: {threshold:.2f}', 
+                         rotation=90, fontsize=8, color=color)
+            
+            if scale_type == 'log':
+                plt.yscale('log')
+                plt.ylim(bottom=0.001)
+                plt.title('Normalized Histograms with Thresholds (Log Scale)')
+            else:
+                plt.title('Normalized Histograms with Thresholds')
+                
+            plt.xlabel('Pixel Value', fontsize=12)
+            plt.ylabel('Normalized Frequency', fontsize=12)
+            plt.grid(True, alpha=0.3, linestyle='--')
+            
+            # Create legend with two columns if many methods
+            if len(threshold_methods) > 6:
+                ncol = 2
+            else:
+                ncol = 1
+                
+            plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left', ncol=ncol, fontsize=10)
+            plt.tight_layout()
+            plt.savefig(os.path.join(plots_dir, f'all_thresholds_comparison_{scale_type}.png'), dpi=300)
+            plt.close()
+            
+    # Create a heatmap of threshold values for quick comparison
+    if threshold_methods:
+        plt.figure(figsize=(12, len(threshold_methods)/2 + 2))
         
-        plt.title('Normalized Histograms with Thresholds')
-        plt.xlabel('Pixel Value')
-        plt.ylabel('Normalized Frequency')
-        plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
+        # Get threshold values and sort them
+        thresholds = [threshold_tracker[m] for m in threshold_methods]
+        sorted_indices = np.argsort(thresholds)
+        sorted_methods = [threshold_methods[i] for i in sorted_indices]
+        sorted_thresholds = [thresholds[i] for i in sorted_indices]
+        
+        # Create horizontal bar chart of thresholds
+        bars = plt.barh(sorted_methods, sorted_thresholds, height=0.6)
+        
+        # Add threshold values as text
+        for i, bar in enumerate(bars):
+            plt.text(bar.get_width() + 0.5, bar.get_y() + bar.get_height()/2, 
+                     f'{sorted_thresholds[i]:.2f}', 
+                     va='center', fontsize=10)
+        
+        plt.xlabel('Threshold Value', fontsize=12)
+        plt.title('Comparison of Threshold Values Across Methods', fontsize=14)
+        plt.grid(True, axis='x', alpha=0.3, linestyle='--')
         plt.tight_layout()
-        plt.savefig(os.path.join(plots_dir, 'all_thresholds_comparison.png'))
+        plt.savefig(os.path.join(plots_dir, 'threshold_comparison_chart.png'), dpi=300)
         plt.close()
-
-def train_threshold_model(outputDir):
-    """
-    Train a lightweight model to predict thresholds based on histogram features.
-    
-    Parameters:
-    -----------
-    outputDir : str
-        Directory where histogram_features.csv is stored
-        
-    Returns:
-    --------
-    model
-        Trained model for threshold prediction
-    """
-    import pandas as pd
-    import numpy as np
-    import os
-    from sklearn.ensemble import RandomForestRegressor
-    from sklearn.model_selection import train_test_split
-    from sklearn.preprocessing import StandardScaler
-    import joblib
-    
-    # Load histogram features
-    features_file = os.path.join(outputDir, 'histogram_features.csv')
-    if not os.path.exists(features_file):
-        print(f"Error: Features file not found at {features_file}")
-        return None
-        
-    df = pd.read_csv(features_file, index_col=0)
-    
-    # Filter only rows with threshold values
-    df = df.dropna(subset=['threshold'])
-    
-    if len(df) == 0:
-        print("Error: No threshold data available for training")
-        return None
-    
-    # Prepare features and target
-    X = df.drop(columns=['threshold'])
-    y = df['threshold']
-    
-    # Train-test split
-    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
-    
-    # Scale features
-    scaler = StandardScaler()
-    X_train_scaled = scaler.fit_transform(X_train)
-    X_test_scaled = scaler.transform(X_test)
-    
-    # Train model
-    model = RandomForestRegressor(n_estimators=100, random_state=42)
-    model.fit(X_train_scaled, y_train)
-    
-    # Evaluate model
-    train_score = model.score(X_train_scaled, y_train)
-    test_score = model.score(X_test_scaled, y_test)
-    
-    print(f"Model R² score on training data: {train_score:.4f}")
-    print(f"Model R² score on test data: {test_score:.4f}")
-    
-    # Save model and scaler
-    model_dir = os.path.join(outputDir, "model")
-    if not os.path.exists(model_dir):
-        os.makedirs(model_dir)
-        
-    joblib.dump(model, os.path.join(model_dir, "threshold_model.pkl"))
-    joblib.dump(scaler, os.path.join(model_dir, "scaler.pkl"))
-    
-    # Calculate feature importance
-    feature_importance = pd.DataFrame({
-        'Feature': X.columns,
-        'Importance': model.feature_importances_
-    }).sort_values(by='Importance', ascending=False)
-    
-    feature_importance.to_csv(os.path.join(model_dir, "feature_importance.csv"), index=False)
-    
-    # Plot feature importance
-    plt.figure(figsize=(10, 8))
-    plt.barh(feature_importance['Feature'], feature_importance['Importance'])
-    plt.xlabel('Importance')
-    plt.ylabel('Feature')
-    plt.title('Feature Importance for Threshold Prediction')
-    plt.tight_layout()
-    plt.savefig(os.path.join(model_dir, "feature_importance.png"))
-    plt.close()
-    
-    return model, scaler
