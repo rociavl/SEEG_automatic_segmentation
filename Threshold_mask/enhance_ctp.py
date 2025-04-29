@@ -745,16 +745,16 @@ def enhance_ctp(inputVolume, inputROI=None, methods = 'all', outputDir=None):
 
 
 ####################
-inputVolume = slicer.util.getNode('CTp.3D')  
-inputROI = slicer.util.getNode('patient2_mask_5')  # Brain Mask 
-# # # # # # # Output directory
-outputDir = r"C:\Users\rocia\Downloads\TFG\Cohort\Enhance_ctp_tests\P2\TH50"
-# # # # # # # # # # # Test the function 
-enhancedVolumeNodes = enhance_ctp(inputVolume, inputROI, methods='all', outputDir=outputDir)
-# # # # # # # # # # # Access the enhanced volume nodes
-for method, volume_node in enhancedVolumeNodes.items():
-              if volume_node is not None:
-                  print(f"Enhanced volume for method '{method}': {volume_node.GetName()}")
-              else:
-                  print(f"Enhanced volume for method '{method}': No volume node available.")
+# inputVolume = slicer.util.getNode('CTp.3D')  
+# inputROI = slicer.util.getNode('patient2_mask_5')  # Brain Mask 
+# # # # # # # # Output directory
+# outputDir = r"C:\Users\rocia\Downloads\TFG\Cohort\Enhance_ctp_tests\P2\TH50"
+# # # # # # # # # # # # Test the function 
+# enhancedVolumeNodes = enhance_ctp(inputVolume, inputROI, methods='all', outputDir=outputDir)
+# # # # # # # # # # # # Access the enhanced volume nodes
+# for method, volume_node in enhancedVolumeNodes.items():
+#               if volume_node is not None:
+#                   print(f"Enhanced volume for method '{method}': {volume_node.GetName()}")
+#               else:
+#                   print(f"Enhanced volume for method '{method}': No volume node available.")
 #exec(open(r'C:\Users\rocia\AppData\Local\slicer.org\Slicer 5.6.2\SEEG_module\SEEG_masking\Threshold_mask\enhance_ctp.py').read())

@@ -62,18 +62,19 @@ def create_electrode_mask_from_fiducials_and_save_csv(fiducial_data, volume_path
 
 
 ### Example volume to resample
-volume_node = slicer.util.getNode("CTp.3D")  
+volume_node = slicer.util.getNode("5_CTp.3D")  
 # Get fiducials from two different markups nodes
-fiducial_data_node_1, number_electrodes_1 = get_fiducials_from_slicer("real-P")  
-fiducial_data_node_2, number_electrodes_2 = get_fiducials_from_slicer("real-WM")
-combined_fiducial_data = fiducial_data_node_1 + fiducial_data_node_2  
-total_electrodes = number_electrodes_1 + number_electrodes_2
+fiducial_data_node_1, number_electrodes_1 = get_fiducials_from_slicer("real_White_Matter")  
+fiducial_data_node_2, number_electrodes_2 = get_fiducials_from_slicer("real_Grey_Matter")
+fiducial_data_node_3, number_electrodes_3 = get_fiducials_from_slicer("real_outside_brain") #para p5, P6
+combined_fiducial_data = fiducial_data_node_1 + fiducial_data_node_2  + fiducial_data_node_3
+total_electrodes = number_electrodes_1 + number_electrodes_2 + number_electrodes_3
 
 # list_fiducials(combined_fiducial_data)
 
-volume_path = r"C:\Users\rocia\Downloads\TFG\Cohort\Models\Model_brain_mask\Dataset\MASK\patient2_mask_1.nrrd"
-output_filename = r"C:\Users\rocia\Downloads\TFG\Cohort\electrodes\P2\GT\P1_mask2_electrode_fiducials.nrrd"
-csv_filename = r"C:\Users\rocia\Downloads\TFG\Cohort\electrodes\P2\GT\P1_mask2_electrode_fiducials.csv"
+volume_path = r"C:\Users\rocia\Downloads\TFG\Cohort\Models\Model_brain_mask\Dataset\MASK\patient5_mask_5.nrrd"
+output_filename = r"C:\Users\rocia\Downloads\TFG\Cohort\electrodes\P5\GT\P5_electrode_fiducials.nrrd"
+csv_filename = r"C:\Users\rocia\Downloads\TFG\Cohort\electrodes\P5\GT\P5_electrode_fiducials.csv"
 
 create_electrode_mask_from_fiducials_and_save_csv(combined_fiducial_data, volume_path, output_filename,csv_filename, radius_mm=0.4)
 print(f'Total number of electrodes: {total_electrodes}')

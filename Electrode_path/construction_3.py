@@ -18,7 +18,7 @@ from Outermost_centroids_coordinates.outermost_centroids_vol_slicer import (
 from End_points.midplane_prueba import get_all_centroids
 
 
-def integrated_trajectory_analysis(coords_array, max_neighbor_distance=7.5, min_neighbors=3):
+def integrated_trajectory_analysis(coords_array, entry_points=None, max_neighbor_distance=7.5, min_neighbors=3):
     results = {
         'dbscan': {},
         'louvain': {},
@@ -113,7 +113,6 @@ def integrated_trajectory_analysis(coords_array, max_neighbor_distance=7.5, min_
         if len(cluster_coords) < 2:
             continue
         
-
         louvain_community = None
         if 'dbscan_to_louvain_mapping' in results['combined']:
             louvain_community = results['combined']['dbscan_to_louvain_mapping'].get(cluster_id, None)
@@ -129,8 +128,31 @@ def integrated_trajectory_analysis(coords_array, max_neighbor_distance=7.5, min_
             
             # Project points onto the principal axis
             projected = np.dot(cluster_coords - center, direction)
-            sorted_indices = np.argsort(projected)
-            sorted_coords = cluster_coords[sorted_indices]
+            
+            # If we have entry points, find the closest entry point to determine start of path
+            if entry_points is not None:
+                # Find closest entry point to any point in the cluster
+                min_dist = float('inf')
+                start_entry_point = None
+                for entry in entry_points:
+                    dists = cdist([entry], cluster_coords)
+                    min_cluster_dist = np.min(dists)
+                    if min_cluster_dist < min_dist:
+                        min_dist = min_cluster_dist
+                        start_entry_point = entry
+                
+                if start_entry_point is not None:
+                    # Calculate projection of entry point onto principal axis
+                    entry_projection = np.dot(start_entry_point - center, direction)
+                    # Sort points based on projection relative to entry point
+                    sorted_indices = np.argsort(np.abs(projected - entry_projection))
+                    sorted_coords = cluster_coords[sorted_indices]
+                else:
+                    sorted_indices = np.argsort(projected)
+                    sorted_coords = cluster_coords[sorted_indices]
+            else:
+                sorted_indices = np.argsort(projected)
+                sorted_coords = cluster_coords[sorted_indices]
             
             # Calculate trajectory metrics
             distances = np.linalg.norm(np.diff(sorted_coords, axis=0), axis=1)
@@ -155,7 +177,6 @@ def integrated_trajectory_analysis(coords_array, max_neighbor_distance=7.5, min_
     results['trajectories'] = trajectories
     results['n_trajectories'] = len(trajectories)
 
-    
     return results
 
 def visualize_combined_results(coords_array, results, output_dir=None):
@@ -217,12 +238,13 @@ def visualize_combined_results(coords_array, results, output_dir=None):
 
 def main():
     try:
-
         electrodes_volume = slicer.util.getNode('electrode_mask_success')
-        entry_points_volume = slicer. util.getNode('electrode_mask_success')
-
+        entry_points_volume = slicer.util.getNode('P1_brain_entry_points_1')  # This should be your entry points volume
+        
         output_dir = r"C:\Users\rocia\Downloads\TFG\Cohort\Centroids\Trajectories_28_04\output_plots"
         logging.info("Starting integrated analysis...")
+        
+        # Get centroids for electrodes
         centroids_ras = get_all_centroids(electrodes_volume)
         
         if not centroids_ras:
@@ -230,8 +252,17 @@ def main():
             return
         
         coords_array = np.array(list(centroids_ras.values()))
+        
+        # Get entry points if available
+        entry_points = None
+        if entry_points_volume:
+            entry_centroids_ras = get_all_centroids(entry_points_volume)
+            if entry_centroids_ras:
+                entry_points = np.array(list(entry_centroids_ras.values()))
+        
         results = integrated_trajectory_analysis(
             coords_array=coords_array,
+            entry_points=entry_points,  # Pass entry points if available
             max_neighbor_distance=7.5,
             min_neighbors=3
         )
@@ -239,15 +270,10 @@ def main():
         logging.info(f"Analysis complete: {results['n_trajectories']} trajectories detected.")
         visualize_combined_results(coords_array, results, output_dir)
         
-        # if output_dir:
-        #     import json
-        #     with open(os.path.join(output_dir, 'analysis_results.json'), 'w') as f:
-        #         json.dump(results, f, indent=2)
-        
     except Exception as e:
         logging.error(f"Main execution failed: {str(e)}")
 
-if __name__ == "__main__":
-    main()
 
-#exec(open('C:/Users/rocia/AppData/Local/slicer.org/Slicer 5.6.2/SEEG_module/SEEG_masking/Electrode_path/construction_path.py').read())
+main()
+
+#exec(open(r'C:\Users\rocia\AppData\Local\slicer.org\Slicer 5.6.2\SEEG_module\SEEG_masking\Electrode_path\construction_3.py').read())

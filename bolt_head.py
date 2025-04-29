@@ -11,18 +11,18 @@ import scipy.spatial.distance as distance
 from scipy.ndimage import binary_dilation, binary_erosion
 
 CONFIG = {
-    'threshold_value': 2236,        
+    'threshold_value': 2416, #P1: 2240, P4:2340, P5: 2746, P7: 2806, P8> 2416
     'min_region_size': 100,         
     'max_region_size': 800,         
     'morph_kernel_size': 1,         
     'principal_axis_length': 15,    
-    'output_dir': r"C:\Users\rocia\Downloads\TFG\Cohort\Bolt_heads"  
+    'output_dir': r"C:\Users\rocia\Downloads\TFG\Cohort\Bolt_heads\P8_28_04"  
 }
 def main():
     os.makedirs(CONFIG['output_dir'], exist_ok=True)
     print("Loading volume data...")
-    volume_node = slicer.util.getNode('CTp.3D')
-    brain_mask_node = slicer.util.getNode('patient4_mask_5')
+    volume_node = slicer.util.getNode('8_CTp.3D')
+    brain_mask_node = slicer.util.getNode('patient8_mask_5')
     volume_array = slicer.util.arrayFromVolume(volume_node)
     brain_mask_array = slicer.util.arrayFromVolume(brain_mask_node)
     spacing = volume_node.GetSpacing()
@@ -33,17 +33,17 @@ def main():
     
     print("Performing initial segmentation...")
     binary_mask = volume_array > CONFIG['threshold_value']
-    volume_helper.create_volume(binary_mask.astype(np.uint8), "Threshold_Result", "P1_threshold.nrrd")
+    volume_helper.create_volume(binary_mask.astype(np.uint8), "Threshold_Result", "P8_threshold.nrrd")
     
     print("Removing structures inside brain mask...")
     outside_brain_mask = ~brain_mask_array.astype(bool)  
     bolt_heads_mask = binary_mask & outside_brain_mask   
-    volume_helper.create_volume(bolt_heads_mask.astype(np.uint8), "Outside_Brain_Result", "P1_outside_brain.nrrd")
+    volume_helper.create_volume(bolt_heads_mask.astype(np.uint8), "Outside_Brain_Result", "P8_outside_brain.nrrd")
     
     print("Applying morphological operations...")
     kernel = morphology.ball(CONFIG['morph_kernel_size'])
     cleaned_mask = morphology.binary_closing(bolt_heads_mask, kernel)
-    volume_helper.create_volume(cleaned_mask.astype(np.uint8), "Cleaned_Result", "P1_cleaned.nrrd")
+    volume_helper.create_volume(cleaned_mask.astype(np.uint8), "Cleaned_Result", "P8_cleaned.nrrd")
     if not np.any(cleaned_mask):
         print("No bolt head regions found at the given threshold outside the brain mask.")
         return
@@ -74,13 +74,13 @@ def main():
             })
     
     print(f"Found {len(region_info)} valid bolt head regions after filtering")
-    volume_helper.create_volume(filtered_mask, "Filtered_Bolt_Heads", "P1_filtered_bolt_heads.nrrd")
+    volume_helper.create_volume(filtered_mask, "Filtered_Bolt_Heads", "P8_filtered_bolt_heads.nrrd")
 
     # Generate PRE-VALIDATION plots
     print("Generating PRE-VALIDATION visualizations...")
     plot_size_histogram(region_sizes)
     plot_bolt_vectors(region_info, filtered_mask, spacing, origin)
-    plot_bolt_brain_context(region_info, filtered_mask, brain_mask_array, spacing, origin, name = 'P1_BRAIN_MASK_CONTEXT.png')
+    plot_bolt_brain_context(region_info, filtered_mask, brain_mask_array, spacing, origin, name = 'P8_BRAIN_MASK_CONTEXT.png')
     plot_bolt_distances_and_orientations(
             region_info, 
             brain_mask_array, 
@@ -113,6 +113,8 @@ def main():
         info['entry_distance'] = distance
     # Plotting entry points for validated regions
     plot_entry_points(validated_regions, filtered_mask, brain_mask_array, spacing, origin)
+    plot_multi_view_entry_points(validated_regions, filtered_mask, brain_mask_array, spacing, origin)
+
     # Outlier analysis
     outliers, outlier_details = comprehensive_outlier_analysis(
         region_info, brain_mask_array, spacing, origin
@@ -192,8 +194,9 @@ def calculate_brain_intersection(centroid, direction, brain_mask, spacing, origi
         strategies = [
             {'step_size': 0.5, 'max_multiplier': 3},   # Conservative
             {'step_size': 1.0, 'max_multiplier': 5},   # Broader
-            {'step_size': 0.25, 'max_multiplier': 2}   # Fine-grained
+            {'step_size': 0.25, 'max_multiplier': 10}  # More extensive search
         ]
+        
         for strategy in strategies:
             step_size = strategy['step_size']
             max_distance = np.sqrt(sum([(shape[i] * spacing[i])**2 for i in range(3)]))
@@ -201,16 +204,20 @@ def calculate_brain_intersection(centroid, direction, brain_mask, spacing, origi
             current_pos = voxel_centroid.copy()
             last_pos = current_pos.copy()
             distance_traveled = 0
+            
             for _ in range(max_iterations):
                 current_pos += direction * step_size / np.array(spacing)
                 distance_traveled += step_size
+                
                 # Round to nearest integer for mask indexing
                 x, y, z = np.round(current_pos).astype(int)
+                
                 # Out of bounds check
                 if (x < 0 or x >= shape[0] or
                     y < 0 or y >= shape[1] or
                     z < 0 or z >= shape[2]):
                     break
+                    
                 # Brain mask intersection
                 if brain_mask[x, y, z] > 0:
                     # Interpolate intersection point
@@ -218,12 +225,15 @@ def calculate_brain_intersection(centroid, direction, brain_mask, spacing, origi
                     intersection_point = np.array([
                         origin[i] + intersection_voxel[i] * spacing[i] for i in range(3)
                     ])
+                    
                     # Add sanity checks
                     if np.linalg.norm(intersection_point - centroid) > max_distance:
                         continue
                     
                     return intersection_point, distance_traveled
+                
                 last_pos = current_pos.copy()
+        
         print(f"No brain intersection found for bolt at {centroid}")
         return None, None
     
@@ -244,7 +254,7 @@ def plot_threshold_distribution(volume_array):
                 label=f'Threshold ({CONFIG["threshold_value"]})')
     plt.legend()
     plt.grid(True, alpha=0.3)
-    plt.savefig(os.path.join(CONFIG['output_dir'], "P1_intensity_distribution.png"), dpi=300)
+    plt.savefig(os.path.join(CONFIG['output_dir'], "P8_intensity_distribution.png"), dpi=300)
     plt.close()
 
 def plot_segmentation_stages(volume_array, brain_mask_array, bolt_heads_mask, cleaned_mask):
@@ -260,7 +270,7 @@ def plot_segmentation_stages(volume_array, brain_mask_array, bolt_heads_mask, cl
     axs[1, 1].imshow(cleaned_mask[mid_slice], cmap='hot') # Cleaned Mask
     axs[1, 1].set_title('Cleaned Bolt Heads Mask')
     plt.tight_layout()
-    plt.savefig(os.path.join(CONFIG['output_dir'], "P1_segmentation_stages.png"), dpi=300)
+    plt.savefig(os.path.join(CONFIG['output_dir'], "P8_segmentation_stages.png"), dpi=300)
     plt.close()
 
 def plot_region_characteristics(regions):
@@ -272,7 +282,7 @@ def plot_region_characteristics(regions):
     axs[0].set_xlabel('Volume (voxels)')
     axs[0].set_ylabel('Frequency')
     plt.tight_layout()
-    plt.savefig(os.path.join(CONFIG['output_dir'], "P1_region_characteristics.png"), dpi=300)
+    plt.savefig(os.path.join(CONFIG['output_dir'], "P8_region_characteristics.png"), dpi=300)
     plt.close()
 
 def plot_entry_points(region_info, filtered_mask, brain_mask, spacing, origin):
@@ -297,7 +307,7 @@ def plot_entry_points(region_info, filtered_mask, brain_mask, spacing, origin):
     ax.set_zlabel('Z (mm)')
     ax.set_title('Bolt Heads with Brain Entry Points')
     ax.view_init(elev=30, azim=45)
-    plt.savefig(os.path.join(CONFIG['output_dir'], "P1_bolt_heads_entry_points.png"), dpi=300)
+    plt.savefig(os.path.join(CONFIG['output_dir'], "P8_bolt_heads_entry_points.png"), dpi=300)
     plt.close()
 
 def calculate_principal_axis(coords, spacing):
@@ -316,7 +326,7 @@ def plot_size_histogram(region_sizes):
     plt.xlabel('Volume (voxels)')
     plt.ylabel('Frequency')
     plt.grid(True)
-    plt.savefig(os.path.join(CONFIG['output_dir'], "P1_size_distribution.png"), dpi=300)
+    plt.savefig(os.path.join(CONFIG['output_dir'], "P8_size_distribution.png"), dpi=300)
     plt.close()
 
 def compute_distance_to_surface(point, brain_mask, spacing, origin):
@@ -574,11 +584,101 @@ def plot_bolt_vectors(region_info, filtered_mask, spacing, origin):
     ax.set_title('Bolt Heads with Direction Vectors')
     ax.view_init(elev=30, azim=45)
     
-    plt.savefig(os.path.join(CONFIG['output_dir'], "P1_bolt_heads_with_vectors.png"), dpi=300)
+    plt.savefig(os.path.join(CONFIG['output_dir'], "P8_bolt_heads_with_vectors.png"), dpi=300)
     plt.close()
 
+
+def plot_multi_view_entry_points(region_info, filtered_mask, brain_mask, spacing, origin):
+    # Create a 2x2 grid of plots with different viewing angles
+    fig = plt.figure(figsize=(18, 16))
+    
+    # Define different viewing angles
+    view_angles = [
+        {'elev': 30, 'azim': 45, 'title': 'Standard View (30°, 45°)'},
+        {'elev': 0, 'azim': 0, 'title': 'Front View (0°, 0°)'},
+        {'elev': 90, 'azim': 0, 'title': 'Top View (90°, 0°)'},
+        {'elev': 0, 'azim': 90, 'title': 'Side View (0°, 90°)'}
+    ]
+    
+    for i, view in enumerate(view_angles):
+        ax = fig.add_subplot(2, 2, i+1, projection='3d')
+        
+        try:
+            # Plot brain surface
+            plot_surface(ax, brain_mask, spacing, origin, 'lightblue', 0.3)
+            
+            # Plot bolt heads and vectors
+            entry_points_exist = False
+            for info in region_info:
+                try:
+                    # Only plot surfaces for regions with valid labels
+                    if 'label' in info and filtered_mask is not None:
+                        plot_surface(ax, filtered_mask == info['label'], spacing, origin, 'yellow', 0.8)
+                    
+                    # Plot centroid and direction vector
+                    if 'physical_centroid' in info and 'principal_axis' in info:
+                        centroid = np.array(info['physical_centroid'])
+                        vector = np.array(info['principal_axis'])
+                        ax.quiver(*centroid, *vector, color='red', linewidth=2, arrow_length_ratio=0.2)
+                    
+                    # Plot entry points if available
+                    if 'brain_entry_point' in info and info['brain_entry_point'] is not None:
+                        entry_points_exist = True
+                        entry_point = info['brain_entry_point']
+                        ax.scatter(entry_point[0], entry_point[1], entry_point[2], 
+                                  color='green', s=100, marker='o')
+                        
+                        # Add a line connecting bolt head centroid to entry point
+                        if 'physical_centroid' in info:
+                            centroid = np.array(info['physical_centroid'])
+                            ax.plot([centroid[0], entry_point[0]], 
+                                    [centroid[1], entry_point[1]], 
+                                    [centroid[2], entry_point[2]], 
+                                    'g--', alpha=0.7)
+                except Exception as e:
+                    print(f"Error plotting region: {e}")
+                    continue
+            
+            # Set the view angle for this subplot
+            ax.view_init(elev=view['elev'], azim=view['azim'])
+            
+            # Set labels and title
+            ax.set_xlabel('X (mm)')
+            ax.set_ylabel('Y (mm)')
+            ax.set_zlabel('Z (mm)')
+            ax.set_title(view['title'])
+            
+            # Add a legend (only to the first subplot to avoid redundancy)
+            if i == 0:
+                from matplotlib.lines import Line2D
+                legend_elements = [
+                    Line2D([0], [0], color='lightblue', lw=4, alpha=0.3),
+                    Line2D([0], [0], color='yellow', lw=4, alpha=0.8),
+                    Line2D([0], [0], color='red', lw=2)
+                ]
+                legend_labels = ['Brain Surface', 'Bolt Head', 'Direction Vector']
+                
+                # Only add entry point legend elements if entry points exist
+                if entry_points_exist:
+                    legend_elements.extend([
+                        Line2D([0], [0], color='green', lw=2, linestyle='--'),
+                        Line2D([0], [0], marker='o', color='green', markersize=10, linestyle='None')
+                    ])
+                    legend_labels.extend(['Trajectory', 'Entry Point'])
+                
+                ax.legend(legend_elements, legend_labels, loc='upper right')
+        
+        except Exception as e:
+            print(f"Error in subplot {i+1}: {e}")
+            ax.text(0.5, 0.5, f"Error: {str(e)}", ha='center', va='center', transform=ax.transAxes)
+    
+    plt.tight_layout()
+    plt.savefig(os.path.join(CONFIG['output_dir'], "P1_bolt_heads_entry_points_multi_view.png"), dpi=300)
+    plt.close()
+    print("✅ Multi-view entry points plot created successfully")
+
 # Plot bolts with brain context
-def plot_bolt_brain_context(region_info, filtered_mask, brain_mask, spacing, origin, name = "P1_bolt_heads_brain_context.png"):
+def plot_bolt_brain_context(region_info, filtered_mask, brain_mask, spacing, origin, name = "P8_bolt_heads_brain_context.png"):
     fig = plt.figure(figsize=(12, 10))
     ax = fig.add_subplot(111, projection='3d')
     plot_surface(ax, brain_mask, spacing, origin, 'lightblue', 0.3)
@@ -602,6 +702,15 @@ def plot_bolt_brain_context(region_info, filtered_mask, brain_mask, spacing, ori
 
 # Generate text report
 def generate_report(region_info, outliers=None):
+    # Safety check to ensure region_info is not empty
+    if not region_info:
+        print("Warning: No regions to generate report for.")
+        with open(os.path.join(CONFIG['output_dir'], "P1_bolt_heads_report.txt"), 'w') as f:
+            f.write("SEEG Bolt Heads Analysis Report\n")
+            f.write("==============================\n\n")
+            f.write("No valid bolt head regions detected.\n")
+        return
+        
     with open(os.path.join(CONFIG['output_dir'], "P1_bolt_heads_report.txt"), 'w') as f:
         f.write("SEEG Bolt Heads Analysis Report\n")
         f.write("==============================\n\n")
@@ -614,20 +723,25 @@ def generate_report(region_info, outliers=None):
                 f.write("⚠️ WARNING: BOLT HEADS TOO FAR FROM BRAIN SURFACE ⚠️\n")
                 f.write("The following bolt heads are more than 30 mm from the brain surface:\n")
                 for idx in distant_bolts:
-                    f.write(f"  - Bolt Head #{idx+1}: {region_info[idx]['physical_centroid']}\n")
+                    if idx < len(region_info):  # Ensure index is in range
+                        f.write(f"  - Bolt Head #{idx+1}: {region_info[idx]['physical_centroid']}\n")
                 f.write("\n")
         
         for i, info in enumerate(region_info, 1):
-            f.write(f"Bolt Head #{i} (Label {info['label']}):\n")
+            f.write(f"Bolt Head #{i} (Label {info.get('label', 'Unknown')}):\n")
             f.write(f"  - Position: ({info['physical_centroid'][0]:.1f}, {info['physical_centroid'][1]:.1f}, {info['physical_centroid'][2]:.1f}) mm\n")
-            f.write(f"  - Size: {info['volume']} voxels\n")
-            f.write(f"  - Direction: [{info['principal_axis'][0]:.2f}, {info['principal_axis'][1]:.2f}, {info['principal_axis'][2]:.2f}]\n")
+            f.write(f"  - Size: {info.get('volume', 'Unknown')} voxels\n")
+            
+            if 'principal_axis' in info:
+                f.write(f"  - Direction: [{info['principal_axis'][0]:.2f}, {info['principal_axis'][1]:.2f}, {info['principal_axis'][2]:.2f}]\n")
+            else:
+                f.write("  - Direction: Unknown\n")
             
             # Add entry point information if available
             if 'brain_entry_point' in info and info['brain_entry_point'] is not None:
                 entry = info['brain_entry_point']
                 f.write(f"  - Brain Entry Point: ({entry[0]:.1f}, {entry[1]:.1f}, {entry[2]:.1f}) mm\n")
-                f.write(f"  - Distance to Entry: {info['entry_distance']:.1f} mm\n")
+                f.write(f"  - Distance to Entry: {info.get('entry_distance', 'Unknown'):.1f} mm\n")
             else:
                 f.write(f"  - Brain Entry Point: Not found\n")
             
@@ -685,11 +799,11 @@ def plot_brain_context_with_validation(validated_regions, invalidated_regions, f
     ax.set_title('Bolt Heads Validation: Brain Surface Distance')
     ax.view_init(elev=30, azim=45)
     
-    plt.savefig(os.path.join(CONFIG['output_dir'], "P1_bolt_heads_brain_validation.png"), dpi=300)
+    plt.savefig(os.path.join(CONFIG['output_dir'], "P8_bolt_heads_brain_validation.png"), dpi=300)
     plt.close()
 
     # Update the text report to include surface distance information
-    with open(os.path.join(CONFIG['output_dir'], "P1_bolt_heads_validation_report.txt"), 'w') as f:
+    with open(os.path.join(CONFIG['output_dir'], "P8_bolt_heads_validation_report.txt"), 'w') as f:
         f.write("SEEG Bolt Heads Validation Report\n")
         f.write("==================================\n\n")
         
