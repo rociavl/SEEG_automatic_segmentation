@@ -378,56 +378,56 @@ def create_histogram_report(histogram_data, threshold_tracker,hist_features,  ou
     # Enhanced plot for comparing all methods with thresholds
     threshold_methods = [m for m in threshold_tracker.keys() if m in histogram_data]
     
-    if threshold_methods:
-        # Create two comparison plots: one regular and one with log scale
-        for scale_type in ['linear', 'log']:
-            # Determine appropriate figure size based on number of methods
-            fig_width = min(20, 12 + len(threshold_methods) * 0.5)
+    # if threshold_methods:
+    #     # Create two comparison plots: one regular and one with log scale
+    #     for scale_type in ['linear', 'log']:
+    #         # Determine appropriate figure size based on number of methods
+    #         fig_width = min(20, 12 + len(threshold_methods) * 0.5)
             
-            plt.figure(figsize=(fig_width, 10))
+    #         plt.figure(figsize=(fig_width, 10))
             
-            # Use colormap for better differentiation between methods
-            norm = Normalize(vmin=0, vmax=len(threshold_methods)-1)
+    #         # Use colormap for better differentiation between methods
+    #         norm = Normalize(vmin=0, vmax=len(threshold_methods)-1)
             
-            # Plot each method with distinct color
-            for i, method in enumerate(threshold_methods):
-                data = histogram_data[method]
-                # Normalize histogram
-                normalized_hist = data['hist'] / np.max(data['hist'])
-                color = colormap(norm(i))
+    #         # Plot each method with distinct color
+    #         for i, method in enumerate(threshold_methods):
+    #             data = histogram_data[method]
+    #             # Normalize histogram
+    #             normalized_hist = data['hist'] / np.max(data['hist'])
+    #             color = colormap(norm(i))
                 
-                plt.plot(data['bin_centers'], normalized_hist, 
-                         label=method, color=color, linewidth=2)
+    #             plt.plot(data['bin_centers'], normalized_hist, 
+    #                      label=method, color=color, linewidth=2)
                 
-                # Add threshold line with matching color
-                threshold = threshold_tracker[method]
-                plt.axvline(x=threshold, linestyle='--', color=color, alpha=0.7)
+    #             # Add threshold line with matching color
+    #             threshold = threshold_tracker[method]
+    #             plt.axvline(x=threshold, linestyle='--', color=color, alpha=0.7)
                 
-                # Annotate threshold value
-                plt.text(threshold, 0.5 + i*0.05, f'{method}: {threshold:.2f}', 
-                         rotation=90, fontsize=8, color=color)
+    #             # Annotate threshold value
+    #             plt.text(threshold, 0.5 + i*0.05, f'{method}: {threshold:.2f}', 
+    #                      rotation=90, fontsize=8, color=color)
             
-            if scale_type == 'log':
-                plt.yscale('log')
-                plt.ylim(bottom=1e-8)
-                plt.title('Normalized Histograms with Thresholds (Log Scale)')
-            else:
-                plt.title('Normalized Histograms with Thresholds')
+    #         if scale_type == 'log':
+    #             plt.yscale('log')
+    #             plt.ylim(bottom=1e-8)
+    #             plt.title('Normalized Histograms with Thresholds (Log Scale)')
+    #         else:
+    #             plt.title('Normalized Histograms with Thresholds')
                 
-            plt.xlabel('Pixel Value', fontsize=12)
-            plt.ylabel('Normalized Frequency', fontsize=12)
-            plt.grid(True, alpha=0.3, linestyle='--')
+    #         plt.xlabel('Pixel Value', fontsize=12)
+    #         plt.ylabel('Normalized Frequency', fontsize=12)
+    #         plt.grid(True, alpha=0.3, linestyle='--')
             
-            # Create legend with two columns if many methods
-            if len(threshold_methods) > 6:
-                ncol = 2
-            else:
-                ncol = 1
+    #         # Create legend with two columns if many methods
+    #         if len(threshold_methods) > 6:
+    #             ncol = 2
+    #         else:
+    #             ncol = 1
                 
-            plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left', ncol=ncol, fontsize=10)
-            plt.tight_layout()
-            plt.savefig(os.path.join(plots_dir, f'all_thresholds_comparison_{scale_type}.png'), dpi=300)
-            plt.close()
+    #         plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left', ncol=ncol, fontsize=10)
+    #         plt.tight_layout()
+    #         plt.savefig(os.path.join(plots_dir, f'all_thresholds_comparison_{scale_type}.png'), dpi=300)
+    #         plt.close()
             
     # Create a heatmap of threshold values for quick comparison
     if threshold_methods:
