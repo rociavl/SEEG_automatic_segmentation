@@ -35,6 +35,7 @@ def extractFeatures(volumeNode):
     features['p75'] = np.percentile(volume_array, 75)
     features['p95'] = np.percentile(volume_array, 95)
     features['p99'] = np.percentile(volume_array, 99)
+
     
     # Compute histogram
     hist, bin_edges = np.histogram(volume_array.flatten(), bins=256)
@@ -50,6 +51,11 @@ def extractFeatures(volumeNode):
     features['p99.5'] = np.percentile(volume_array, 99.5)
     features['p99.9'] = np.percentile(volume_array, 99.9)
     features['p99.99'] = np.percentile(volume_array, 99.99)
+
+    # features['p99.8'] = np.percentile(volume_array, 99.5)
+    # features['p99.95'] = np.percentile(volume_array, 99.9)
+    # features['p99.99'] = np.percentile(volume_array, 99.99)
+    # features['p99.999'] = np.percentile(volume_array, 99.999)
     
     # Calculate skewness and kurtosis
     features['skewness'] = stats.skew(volume_array.flatten())

@@ -1,90 +1,392 @@
-import slicer
+import os
 import numpy as np
 import SimpleITK as sitk
-import vtk
-from scipy import stats
+import matplotlib.pyplot as plt
+import slicer
+from pathlib import Path
 
-def load_mask_to_array(mask_node_name):
-    mask_node = slicer.util.getNode(mask_node_name)
-    if mask_node is None:
-        raise ValueError(f"Mask node {mask_node_name} not found.")
+class MaskSelector:
+    def __init__(self, mask_folder_path, output_dir):
+        """
+        Initialize the mask selector with the path to the masks folder and output directory.
+        
+        Args:
+            mask_folder_path: Path to the folder containing mask files
+            output_dir: Path to the output directory for saving results
+        """
+        self.mask_folder_path = Path(mask_folder_path)
+        self.output_dir = Path(output_dir)
+        self.output_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Dictionary to store mask arrays
+        self.masks = {}
+        self.reference_origin = None
+        self.reference_spacing = None
+        self.reference_direction = None
+        self.reference_size = None
+        
+        # Load all masks from the folder
+        self.load_all_masks()
+        
+        # Initialize vote map
+        self.global_vote_map = np.zeros_like(next(iter(self.masks.values())))
+        
+    def load_all_masks(self):
+        """Load all NRRD mask files from the specified folder"""
+        print(f"Loading masks from {self.mask_folder_path}")
+        
+        mask_files = list(self.mask_folder_path.glob("*.nrrd"))
+        if not mask_files:
+            raise ValueError(f"No NRRD files found in {self.mask_folder_path}")
+            
+        print(f"Found {len(mask_files)} mask files")
+        
+        # Load each mask
+        for i, mask_file in enumerate(mask_files):
+            mask_sitk = sitk.ReadImage(str(mask_file))
+            # Store reference information from the first mask
+            if i == 0:
+                self.reference_origin = mask_sitk.GetOrigin()
+                self.reference_spacing = mask_sitk.GetSpacing()
+                self.reference_direction = mask_sitk.GetDirection()
+                self.reference_size = mask_sitk.GetSize()
+            # Convert to numpy array and binarize
+            mask_array = sitk.GetArrayFromImage(mask_sitk)
+            mask_array = np.where(mask_array > 0, 1, 0).astype(np.uint8)
+            # Store the mask array
+            self.masks[mask_file.stem] = mask_array
+        print(f"Successfully loaded {len(self.masks)} masks")
     
-    mask_array = slicer.util.arrayFromVolume(mask_node)  
-    origin = mask_node.GetOrigin()
-    spacing = mask_node.GetSpacing()
-
-    ijkToRasMatrix = vtk.vtkMatrix4x4()
-    mask_node.GetIJKToRASMatrix(ijkToRasMatrix)
+    def compute_global_agreement(self):
+        """Compute the global agreement vote map across all masks"""
+        if not self.masks:
+            raise ValueError("No masks loaded")
+        # Reset the global vote map
+        self.global_vote_map = np.zeros_like(next(iter(self.masks.values())))
+        # Sum all masks to create the vote map
+        for mask_array in self.masks.values():
+            self.global_vote_map += mask_array
+        return self.global_vote_map
     
-    return mask_array, origin, spacing, ijkToRasMatrix
-
-def binarize_mask(mask_array):
-    return np.where(mask_array > 0, 1, 0).astype(np.uint8)
-
-def detect_outliers(mask_arrays):
-    stacked_masks = np.stack(mask_arrays, axis=-1)
-    z_scores = np.abs(stats.zscore(stacked_masks, axis=-1, nan_policy='omit'))
-    return z_scores > 2  
-
-def voting_weighted_fusion(mask_arrays, weights=None):
-    if weights is None:
-        weights = np.ones(len(mask_arrays))  
+    def compute_overlap_score(self, mask_array, vote_map):
+        """
+        Compute the overlap score between a mask and the current vote map.
+        This measures how much this mask contributes to the consensus.
+        
+        Args:
+            mask_array: Binary mask array
+            vote_map: Current vote map
+        
+        Returns:
+            overlap_score: The weighted overlap score
+        """
+        # Calculate overlap: voxels where both mask and vote map are positive
+        overlap = mask_array * (vote_map > 0)
+        
+        # Weight by the vote map values to favor voxels with higher consensus
+        weighted_overlap = np.sum(overlap * vote_map)
+        
+        # Normalize by the sum of mask voxels to avoid favoring large masks
+        mask_sum = np.sum(mask_array)
+        if mask_sum == 0:
+            return 0
+            
+        return weighted_overlap / mask_sum
     
-    weights = np.array(weights)
-    weights = weights / np.sum(weights)  
+    def dice_score(self, mask1, mask2):
+        """
+        Compute Dice similarity coefficient between two binary masks.
+        
+        Args:
+            mask1: First binary mask
+            mask2: Second binary mask
+            
+        Returns:
+            dice: Dice score between 0 and 1
+        """
+        intersection = np.sum(mask1 * mask2)
+        sum_masks = np.sum(mask1) + np.sum(mask2)
+        
+        if sum_masks == 0:
+            return 0.0
+            
+        return 2.0 * intersection / sum_masks
+    
+    def select_best_masks(self, n_masks=10):
+        """
+        Select the best n_masks using the greedy voting strategy.
+        
+        Args:
+            n_masks: Number of masks to select
+        
+        Returns:
+            selected_masks: List of selected mask names
+        """
+        if n_masks > len(self.masks):
+            print(f"Warning: Requested {n_masks} masks but only {len(self.masks)} are available")
+            n_masks = len(self.masks)
+        
+        # Compute initial global agreement
+        self.compute_global_agreement()
+        
+        # Make a copy of all masks 
+        remaining_masks = dict(self.masks)
+        
+        # Initialize list to store selected masks
+        selected_masks = []
+        
+        # Initialize current vote map (will be updated with each selection)
+        current_vote_map = np.zeros_like(self.global_vote_map)
+        
+        for i in range(n_masks):
+            best_mask_name = None
+            best_score = -1
+            
+            # Evaluate each remaining mask
+            for mask_name, mask_array in remaining_masks.items():
+                # Compute how much this mask would contribute to the current selection
+                score = self.compute_overlap_score(mask_array, self.global_vote_map)
+                
+                if score > best_score:
+                    best_score = score
+                    best_mask_name = mask_name
+            
+            if best_mask_name is None:
+                print(f"Warning: Could not find a suitable mask at iteration {i}")
+                break
+                
+            selected_masks.append(best_mask_name)
+            current_vote_map += remaining_masks[best_mask_name]
+            
+            # Remove the selected mask from consideration
+            del remaining_masks[best_mask_name]
+            
+            print(f"Selected mask {i+1}/{n_masks}: {best_mask_name} (score: {best_score:.4f})")
+        
+        return selected_masks
+    
+    def create_fused_mask(self, mask_names, output_name):
+        """
+        Create a fused mask from the selected masks.
+        
+        Args:
+            mask_names: List of mask names to fuse
+            output_name: Name for the output fused mask
+        
+        Returns:
+            fused_mask: The fused mask array
+        """
+        # Initialize the fused mask
+        fused_mask = np.zeros_like(next(iter(self.masks.values())))
+        
+        # Add all selected masks
+        for mask_name in mask_names:
+            if mask_name in self.masks:
+                fused_mask += self.masks[mask_name]
+        
+        # Binarize: Consider a voxel as part of the electrode if at least half of the masks agree
+        threshold = len(mask_names)* 0.45
+        fused_mask = np.where(fused_mask >= threshold, 1, 0).astype(np.uint8)
+        
+        # Save the fused mask
+        self.save_mask(fused_mask, output_name)
+        
+        return fused_mask
+    
+    def save_mask(self, mask_array, output_name):
+        """
+        Save a mask array as a NRRD file.
+        
+        Args:
+            mask_array: The mask array to save
+            output_name: Name for the output file
+        """
+        # Create a SimpleITK image from the array
+        mask_sitk = sitk.GetImageFromArray(mask_array)
+        
+        # Set the metadata from the reference mask
+        mask_sitk.SetOrigin(self.reference_origin)
+        mask_sitk.SetSpacing(self.reference_spacing)
+        mask_sitk.SetDirection(self.reference_direction)
+        
+        # Save the mask
+        output_path = self.output_dir / f"{output_name}.nrrd"
+        sitk.WriteImage(mask_sitk, str(output_path))
+        print(f"Saved fused mask to: {output_path}")
+    
+    def create_comparison_plots(self, original_masks, selected_masks, fused_original, fused_selected):
+        """
+        Create comparison plots between original and selected masks.
+        
+        Args:
+            original_masks: List of original mask names
+            selected_masks: List of selected mask names
+            fused_original: Original fused mask array
+            fused_selected: Selected fused mask array
+        """
+        # Create a directory for plots
+        plots_dir = self.output_dir / "plots"
+        plots_dir.mkdir(exist_ok=True)
+        
+        # 1. Plot mask overlap histograms
+        self._plot_mask_overlap(original_masks, selected_masks, plots_dir)
+        
+        # 2. Plot Dice scores
+        self._plot_dice_scores(original_masks, selected_masks, fused_original, fused_selected, plots_dir)
+        
+        # 3. Plot mask size distribution
+        self._plot_mask_size_distribution(original_masks, selected_masks, plots_dir)
+        
+        print(f"Saved comparison plots to: {plots_dir}")
+    
+    def _plot_mask_overlap(self, original_masks, selected_masks, plots_dir):
+        """Plot histograms showing mask overlap distribution"""
+        # Compute original overlap
+        original_vote_map = np.zeros_like(next(iter(self.masks.values())))
+        for mask_name in original_masks:
+            if mask_name in self.masks:
+                original_vote_map += self.masks[mask_name]
+        
+        # Compute selected overlap
+        selected_vote_map = np.zeros_like(next(iter(self.masks.values())))
+        for mask_name in selected_masks:
+            if mask_name in self.masks:
+                selected_vote_map += self.masks[mask_name]
+        
+        # Create histograms
+        plt.figure(figsize=(12, 6))
+        
+        # Original masks overlap histogram
+        plt.subplot(1, 2, 1)
+        max_votes = len(original_masks)
+        plt.hist(original_vote_map[original_vote_map > 0].flatten(), 
+                 bins=range(1, max_votes + 2), 
+                 alpha=0.7, 
+                 color='blue')
+        plt.title(f"Original Masks Overlap Distribution (n={len(original_masks)})")
+        plt.xlabel("Number of Masks Agreeing")
+        plt.ylabel("Voxel Count")
+        plt.grid(True, alpha=0.3)
+        
+        # Selected masks overlap histogram
+        plt.subplot(1, 2, 2)
+        max_votes = len(selected_masks)
+        plt.hist(selected_vote_map[selected_vote_map > 0].flatten(), 
+                 bins=range(1, max_votes + 2), 
+                 alpha=0.7, 
+                 color='green')
+        plt.title(f"Selected Masks Overlap Distribution (n={len(selected_masks)})")
+        plt.xlabel("Number of Masks Agreeing")
+        plt.ylabel("Voxel Count")
+        plt.grid(True, alpha=0.3)
+        
+        plt.tight_layout()
+        plt.savefig(plots_dir / "mask_overlap_histogram.png", dpi=300)
+        plt.close()
+    
+    def _plot_dice_scores(self, original_masks, selected_masks, fused_original, fused_selected, plots_dir):
+        """Plot Dice scores comparing each mask to the fused mask"""
+        plt.figure(figsize=(10, 6))
+        
+        # Compute Dice scores for original masks
+        original_scores = []
+        for mask_name in original_masks:
+            if mask_name in self.masks:
+                score = self.dice_score(self.masks[mask_name], fused_original)
+                original_scores.append(score)
+        
+        # Compute Dice scores for selected masks
+        selected_scores = []
+        for mask_name in selected_masks:
+            if mask_name in self.masks:
+                score = self.dice_score(self.masks[mask_name], fused_selected)
+                selected_scores.append(score)
+        
+        # Create bar plot
+        x = np.arange(len(original_masks))
+        width = 0.35
+        
+        plt.bar(x - width/2, original_scores, width, label='Original Masks', alpha=0.7)
+        plt.bar(x[:len(selected_scores)] + width/2, selected_scores, width, label='Selected Masks', alpha=0.7)
+        
+        plt.xlabel('Mask Index')
+        plt.ylabel('Dice Score')
+        plt.title('Dice Score Comparison with Fused Mask')
+        plt.legend()
+        plt.grid(True, alpha=0.3)
+        
+        plt.tight_layout()
+        plt.savefig(plots_dir / "dice_score_comparison.png", dpi=300)
+        plt.close()
+        
+        print(f"Original masks average Dice: {np.mean(original_scores):.3f}")
+        print(f"Selected masks average Dice: {np.mean(selected_scores):.3f}")
+    
+    def _plot_mask_size_distribution(self, original_masks, selected_masks, plots_dir):
+        """Plot the distribution of mask sizes"""
+        plt.figure(figsize=(10, 6))
+        
+        # Compute sizes for original masks
+        original_sizes = []
+        for mask_name in original_masks:
+            if mask_name in self.masks:
+                original_sizes.append(np.sum(self.masks[mask_name]))
+        
+        # Compute sizes for selected masks
+        selected_sizes = []
+        for mask_name in selected_masks:
+            if mask_name in self.masks:
+                selected_sizes.append(np.sum(self.masks[mask_name]))
+        
+        # Create box plot
+        plt.boxplot([original_sizes, selected_sizes], 
+                   tick_labels=[f'Original (n={len(original_sizes)})', f'Selected (n={len(selected_sizes)})'])
+        
+        plt.ylabel('Mask Size (voxels)')
+        plt.title('Mask Size Distribution')
+        plt.grid(True, alpha=0.3)
+        
+        plt.tight_layout()
+        plt.savefig(plots_dir / "mask_size_distribution.png", dpi=300)
+        plt.close()
+        
+        print(f"Original masks average size: {np.mean(original_sizes):.1f} voxels")
+        print(f"Selected masks average size: {np.mean(selected_sizes):.1f} voxels")
 
-    fused_mask = np.zeros_like(mask_arrays[0], dtype=np.float32)
-    outliers = detect_outliers(mask_arrays)
+# Main execution function
+def main():
+    # Paths
+    mask_folder_path = r"C:\Users\rocia\Downloads\TFG\Cohort\Enhance_ctp_tests\P7\TH45_histograms_ml\descargar"
+    output_dir = r"C:\Users\rocia\Downloads\TFG\Cohort\Enhance_ctp_tests\P7_fused_greedy_ML"
+    
+    # Initialize the mask selector
+    selector = MaskSelector(mask_folder_path, output_dir)
+    
+    # Select the best 10 masks
+    selected_masks = selector.select_best_masks(n_masks=10)
+    
+    # Create fused masks for both all masks and the selected masks
+    all_mask_names = list(selector.masks.keys())
+    
+    # Create and save the fused mask from all masks
+    fused_all = selector.create_fused_mask(all_mask_names, "P7_mask_all_fused")
+    
+    # Create individual fused masks for the 10 selected masks
+    for i, mask_name in enumerate(selected_masks, 1):
+        selector.save_mask(selector.masks[mask_name], f"P7_mask_{i}_fused")
+    
+    # Create and save the fused mask from selected masks
+    fused_selected = selector.create_fused_mask(selected_masks, "P7_mask_selected_fused")
+    
+    # Create comparison plots
+    selector.create_comparison_plots(all_mask_names, selected_masks, fused_all, fused_selected)
+    
+    print(f"Selected masks: {selected_masks}")
+    print("Processing complete!")
 
-    for i, mask_array in enumerate(mask_arrays):
-        adjusted_weight = weights[i] * (1 - np.mean(outliers[..., i]))  
-        fused_mask += mask_array * adjusted_weight  
+# Run the script
+if __name__ == "__main__":
+    main()
 
-    fused_mask = np.where(fused_mask >= 0.5, 1, 0).astype(np.uint8)  
-    return fused_mask
-
-def create_fused_volume_node(fused_mask, input_volume, output_node_name, output_dir=None):
-
-    enhancedVolumeNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLScalarVolumeNode", output_node_name)
-
-    enhancedVolumeNode.SetOrigin(input_volume.GetOrigin())
-    enhancedVolumeNode.SetSpacing(input_volume.GetSpacing())
-    ijkToRasMatrix = vtk.vtkMatrix4x4()
-    input_volume.GetIJKToRASMatrix(ijkToRasMatrix)
-    enhancedVolumeNode.SetIJKToRASMatrix(ijkToRasMatrix)
-
-    slicer.util.updateVolumeFromArray(enhancedVolumeNode, fused_mask)
-
-    if output_dir:
-        file_path = f"{output_dir}/{output_node_name}.nrrd"
-        slicer.util.saveNode(enhancedVolumeNode, file_path)
-        print(f"Fused mask saved to: {file_path}")
-
-    return enhancedVolumeNode
-
-def process_masks(mask_node_names, weights=None, output_node_name="FusedMask", output_dir=None):
-
-    mask_arrays, input_volume = [], None
-
-    for i, mask_node_name in enumerate(mask_node_names):
-        mask_array, origin, spacing, matrix = load_mask_to_array(mask_node_name)
-        mask_arrays.append(binarize_mask(mask_array))
-
-        # Use first mask's volume node as reference
-        if i == 0:
-            input_volume = slicer.util.getNode(mask_node_name)
-
-    fused_mask = voting_weighted_fusion(mask_arrays, weights)
-
-    create_fused_volume_node(fused_mask, input_volume, output_node_name, output_dir)
-
-mask_node_names = [
-    "Enhanced_th45_DESCARGAR_FT_gaussian_3_0.540_CTp.3D",
-    "Enhanced_th45_DESCARGAR_FT_TOPHAT_0.490_CTp.3D",
-    "Enhanced_th45_DESCARGAR_FT_ERODE_2_133_CTp.3D"
-]  
-weights = [0.4, 0.3, 0.3]  
-output_dir = r'C:\\Users\\rocia\\Downloads\\TFG\\Cohort\\Enhance_ctp_tests\\P2' 
-process_masks(mask_node_names, weights, output_dir=output_dir, output_node_name="patient2_mask_electrodes_1")
 
 #exec(open('C:/Users/rocia/AppData/Local/slicer.org/Slicer 5.6.2/SEEG_module/SEEG_masking/masks_fusion.py').read())

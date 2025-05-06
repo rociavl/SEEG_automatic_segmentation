@@ -200,7 +200,7 @@ def get_closest_centroids(mask_centroids, gt_centroids, patient_id, output_dir=r
 
 def main():
     try:
-        ground_truth_volume = slicer.util.getNode("P1_electrode_fiducials")
+        ground_truth_volume = slicer.util.getNode("P7_electrode_fiducials")
         mask_volumes = [
             slicer.util.getNode("electrode_mask_success"),
         ]
@@ -208,13 +208,13 @@ def main():
         logging.error(f"Failed to retrieve volumes: {str(e)}")
         return
     
-
-    mask_centroids_dict, gt_centroids = analyze_centroids(mask_volumes, ground_truth_volume, patient_id="P1")
-    get_closest_centroids(mask_centroids_dict, gt_centroids, patient_id="P1")
-    visualize_centroids_in_slicer(mask_centroids_dict, gt_centroids, patient_id="P1")
-    plot_output_path = r"C:\\Users\\rocia\\Downloads\\TFG\\Cohort\\centroid_plot_28_04.png"  
+    mask_centroids_dict, gt_centroids = analyze_centroids(mask_volumes, ground_truth_volume, patient_id="P7")
+    get_closest_centroids(mask_centroids_dict, gt_centroids, patient_id="P7")
+    visualize_centroids_in_slicer(mask_centroids_dict, gt_centroids, patient_id="P7")
+    plot_output_path = r"C:\\Users\\rocia\\Downloads\\TFG\\Cohort\\centroid_plot_06_05.png"  
     plot_centroids(mask_centroids_dict, gt_centroids, plot_output_path)
 
-
 main()
+
 #exec(open(r'C:\Users\rocia\AppData\Local\slicer.org\Slicer 5.6.2\SEEG_module\SEEG_masking\Centroids_pipeline\centroids.py').read())
+

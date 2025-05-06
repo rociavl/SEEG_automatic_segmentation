@@ -464,28 +464,28 @@ def process_original_ctp(enhanced_volumes, volume_array, threshold_tracker):
     print(f"OG_volume_array shape: {enhanced_volumes['OG_volume_array'].shape}")
     
     # Threshold original volume
-    threshold = 2336
-    enhanced_volumes['DESCARGAR_OG_volume_array_2336'] = np.uint8(enhanced_volumes['OG_volume_array'] > threshold)
+    threshold = 2836
+    enhanced_volumes['DESCARGAR_OG_volume_array'] = np.uint8(enhanced_volumes['OG_volume_array'] > threshold)
     threshold_tracker['OG_volume_array'] = threshold
     
     # Gaussian filter on original volume
     enhanced_volumes['OG_gaussian_volume_og'] = gaussian(enhanced_volumes['OG_volume_array'], sigma=0.3)
-    threshold = 1886
+    threshold = 2836
     enhanced_volumes['DESCARGAR_OG_gaussian_volume_og_1886'] = np.uint8(enhanced_volumes['OG_gaussian_volume_og'] > threshold)
     threshold_tracker['OG_gaussian_volume_og'] = threshold
     
     # Gamma correction on gaussian filtered volume
     enhanced_volumes['OG_gamma_volume_og'] = gamma_correction(enhanced_volumes['OG_gaussian_volume_og'], gamma=3)
     # Threshold gamma corrected volume
-    threshold = 143
-    enhanced_volumes['DESCARGAR_OG_gamma_volume_og_143'] = np.uint8(enhanced_volumes['OG_gamma_volume_og'] > threshold)
+    threshold = 215
+    enhanced_volumes['DESCARGAR_OG_gamma_volume_og_85'] = np.uint8(enhanced_volumes['OG_gamma_volume_og'] > threshold)
     threshold_tracker['OG_gamma_volume_og'] = threshold
     
     # Sharpen gamma corrected volume
     enhanced_volumes['OG_sharpened'] = sharpen_high_pass(enhanced_volumes['OG_gamma_volume_og'], strenght=0.8)
     # Threshold sharpened volume
-    threshold = 136
-    enhanced_volumes['DESCARGAR_OG_sharpened_136'] = np.uint8(enhanced_volumes['OG_sharpened'] > threshold)
+    threshold = 215
+    enhanced_volumes['DESCARGAR_OG_sharpened_180'] = np.uint8(enhanced_volumes['OG_sharpened'] > threshold)
     threshold_tracker['OG_sharpened'] = threshold
     
     return enhanced_volumes, threshold_tracker
@@ -506,23 +506,23 @@ def process_roi_gamma_mask(enhanced_volumes, final_roi, volume_array, threshold_
     # Combine ROI mask with gamma corrected volume
     enhanced_volumes['PRUEBA_roi_plus_gamma_mask'] = (final_roi > 0) * enhanced_volumes['OG_gamma_volume_og']
     # Threshold ROI plus gamma mask
-    threshold = 135
-    enhanced_volumes['DESCARGAR_PRUEBA_roi_plus_gamma_mask_1135'] = np.uint8(enhanced_volumes['PRUEBA_roi_plus_gamma_mask'] > threshold)
+    threshold = 163
+    enhanced_volumes['DESCARGAR_PRUEBA_roi_plus_gamma_mask_153'] = np.uint8(enhanced_volumes['PRUEBA_roi_plus_gamma_mask'] > threshold)
     threshold_tracker['PRUEBA_roi_plus_gamma_mask'] = threshold
     
     # Apply CLAHE to ROI plus gamma mask
     enhanced_volumes['PRUEBA_roi_plus_gamma_mask_clahe'] = apply_clahe(enhanced_volumes['PRUEBA_roi_plus_gamma_mask'])
     # Threshold CLAHE result
-    threshold = 152
-    enhanced_volumes['DESCARGAR_PRUEBA_THRESHOLD_CLAHE_152'] = np.uint8(enhanced_volumes['PRUEBA_roi_plus_gamma_mask_clahe'] > threshold)
+    threshold = 170
+    enhanced_volumes['DESCARGAR_PRUEBA_THRESHOLD_CLAHE'] = np.uint8(enhanced_volumes['PRUEBA_roi_plus_gamma_mask_clahe'] > threshold)
     threshold_tracker['PRUEBA_roi_plus_gamma_mask_clahe'] = threshold
     
 
     # Apply wavelet non-local means denoising
     enhanced_volumes['PRUEBA_WAVELET_NL'] = wavelet_nlm_denoise(enhanced_volumes['PRUEBA_roi_plus_gamma_mask'], wavelet='db1')
     # Threshold wavelet NL denoised volume
-    threshold = 144
-    enhanced_volumes['DESCARGAR_PRUEBA_WAVELET_NL_144'] = np.uint8(enhanced_volumes['PRUEBA_WAVELET_NL'] > threshold)
+    threshold = 175
+    enhanced_volumes['DESCARGAR_PRUEBA_WAVELET_NL'] = np.uint8(enhanced_volumes['PRUEBA_WAVELET_NL'] > threshold)
     threshold_tracker['PRUEBA_WAVELET_NL'] = threshold
     
     return enhanced_volumes, threshold_tracker
@@ -537,20 +537,20 @@ def process_roi_only(enhanced_volumes, roi_volume, final_roi, threshold_tracker)
     
     # Apply wavelet denoising
     enhanced_volumes['wavelet_only_roi'] = wavelet_denoise(enhanced_volumes['roi_volume'], wavelet='db1')
-    threshold= 2297
-    enhanced_volumes['DESCARGAR_WAVELET_ROI_2297'] = np.uint8(enhanced_volumes['wavelet_only_roi'] > threshold)
+    threshold= 2720
+    enhanced_volumes['DESCARGAR_WAVELET_ROI'] = np.uint8(enhanced_volumes['wavelet_only_roi'] > threshold)
     threshold_tracker['wavelet_only_roi'] = threshold
 
     
     # Apply gamma correction to wavelet denoised volume
     enhanced_volumes['gamma_only_roi'] = gamma_correction(enhanced_volumes['wavelet_only_roi'], gamma=0.8)
-    threshold = 215
-    enhanced_volumes['DESCARGAR_GAMMA_ONLY_ROI_215'] = np.uint8(enhanced_volumes['gamma_only_roi'] > threshold)
+    threshold = 225
+    enhanced_volumes['DESCARGAR_GAMMA_ONLY_ROI_225'] = np.uint8(enhanced_volumes['gamma_only_roi'] > threshold)
     threshold_tracker['gamma_only_roi'] = threshold
     
     # Threshold ROI volume
-    threshold = 2226
-    enhanced_volumes['DESCARGAR_Threshold_roi_volume_2226'] = np.uint8(enhanced_volumes['roi_volume'] > threshold)
+    threshold = 2736
+    enhanced_volumes['DESCARGAR_Threshold_roi_volume'] = np.uint8(enhanced_volumes['roi_volume'] > threshold)
     threshold_tracker['roi_volume'] = threshold
     
     return enhanced_volumes, threshold_tracker
@@ -569,15 +569,15 @@ def process_roi_plus_gamma_after(enhanced_volumes, final_roi, threshold_tracker)
     
     enhanced_volumes['2_gaussian_volume_roi'] = gaussian(enhanced_volumes['PRUEBA_roi_plus_gamma_mask'], sigma=0.3)
     # Threshold gaussian volume
-    threshold = 0.506
-    enhanced_volumes['DESCARGAR_2_gaussian_volume_roi_0.506'] = np.uint8(enhanced_volumes['2_gaussian_volume_roi'] > threshold)
+    threshold = 0.806
+    enhanced_volumes['DESCARGAR_2_gaussian_volume_roi_0.806'] = np.uint8(enhanced_volumes['2_gaussian_volume_roi'] > threshold)
     threshold_tracker['2_gaussian_volume_roi'] = threshold
     
     # Apply gamma correction
     enhanced_volumes['2_gamma_correction'] = gamma_correction(enhanced_volumes['2_gaussian_volume_roi'], gamma=0.8)
     # Threshold gamma corrected volume
-    threshold = 154
-    enhanced_volumes['DESCARGAR_2_gamma_correction_154'] = np.uint8(enhanced_volumes['2_gamma_correction'] > threshold)
+    threshold = 184
+    enhanced_volumes['DESCARGAR_2_gamma_correction'] = np.uint8(enhanced_volumes['2_gamma_correction'] > threshold)
     threshold_tracker['2_gamma_correction'] = threshold
     
     # Apply top-hat transformation
@@ -586,48 +586,48 @@ def process_roi_plus_gamma_after(enhanced_volumes, final_roi, threshold_tracker)
     enhanced_volumes['2_tophat'] = cv2.addWeighted(enhanced_volumes['2_gaussian_volume_roi'], 1, tophat_2, 2, 0)
     # Threshold top-hat result
     threshold = 0.533
-    enhanced_volumes['DESCARGAR_2_tophat_0.533'] = np.uint8(enhanced_volumes['2_tophat'] > threshold)
+    enhanced_volumes['DESCARGAR_2_tophat'] = np.uint8(enhanced_volumes['2_tophat'] > threshold)
     threshold_tracker['2_tophat'] = threshold
     
     # Sharpen gamma corrected volume
     enhanced_volumes['2_sharpened'] = sharpen_high_pass(enhanced_volumes['2_gamma_correction'], strenght=0.8)
     # Threshold sharpened volume
-    threshold = 155
-    enhanced_volumes['DESCARGAR_2_sharpened_155'] = np.uint8(enhanced_volumes['2_sharpened'] > threshold)
+    threshold = 210
+    enhanced_volumes['DESCARGAR_2_sharpened'] = np.uint8(enhanced_volumes['2_sharpened'] > threshold)
     threshold_tracker['2_sharpened'] = threshold
     
     # Apply LOG transform
     enhanced_volumes['2_LOG'] = log_transform_slices(enhanced_volumes['2_tophat'], c=3)
     # Threshold LOG transform
-    threshold = 155
-    enhanced_volumes['DESCARGAR_2_LOG_155'] = np.uint8(enhanced_volumes['2_LOG'] > threshold)
+    threshold = 230
+    enhanced_volumes['DESCARGAR_2_LOG'] = np.uint8(enhanced_volumes['2_LOG'] > threshold)
     threshold_tracker['2_LOG'] = threshold
     
     # Apply wavelet denoising
     enhanced_volumes['2_wavelet_roi'] = wavelet_denoise(enhanced_volumes['2_LOG'], wavelet='db4')
     # Threshold wavelet result
-    threshold = 150
-    enhanced_volumes['DESCARGAR_2_wavelet_roi_150'] = np.uint8(enhanced_volumes['2_wavelet_roi'] > threshold)
+    threshold = 231
+    enhanced_volumes['DESCARGAR_2_wavelet_roi'] = np.uint8(enhanced_volumes['2_wavelet_roi'] > threshold)
     threshold_tracker['2_wavelet_roi'] = threshold
     
     # Apply erosion
     enhanced_volumes['2_erode'] = morphological_operation(enhanced_volumes['2_sharpened'], operation='erode', kernel_size=1)
     # Threshold eroded volume
-    threshold = 153
-    enhanced_volumes['DESCARGAR_2_153'] = np.uint8(enhanced_volumes['2_erode'] > threshold)
+    threshold = 190
+    enhanced_volumes['DESCARGAR_2'] = np.uint8(enhanced_volumes['2_erode'] > threshold)
     threshold_tracker['2_erode'] = threshold
     
     # Apply gaussian filter
     enhanced_volumes['2_gaussian_2'] = gaussian(enhanced_volumes['2_erode'], sigma=0.2)
-    threshold = 0.605
-    enhanced_volumes['DESCARGAR_2_gaussian_2_0.605'] = np.uint8(enhanced_volumes['2_gaussian_2'] > threshold)
+    threshold = 0.915
+    enhanced_volumes['DESCARGAR_2_gaussian_2'] = np.uint8(enhanced_volumes['2_gaussian_2'] > threshold)
     threshold_tracker['2_gaussian_2'] = threshold
     
     # Sharpen gaussian filtered volume
     enhanced_volumes['2_sharpening_2_trial'] = sharpen_high_pass(enhanced_volumes['2_gaussian_2'], strenght=0.8)
     # Threshold sharpened volume
-    threshold = 0.605
-    enhanced_volumes['DESCARGAR_2_sharpening_2_trial_0.605'] = np.uint8(enhanced_volumes['2_sharpening_2_trial'] > threshold)
+    threshold = 0.915
+    enhanced_volumes['DESCARGAR_2_sharpening_2_trial_0.915'] = np.uint8(enhanced_volumes['2_sharpening_2_trial'] > threshold)
     threshold_tracker['2_sharpening_2_trial'] = threshold
     
     return enhanced_volumes, threshold_tracker
@@ -640,8 +640,8 @@ def process_wavelet_roi(enhanced_volumes, roi_volume, threshold_tracker):
     # Apply non-local means denoising with wavelet
     enhanced_volumes['NUEVO_NLMEANS'] = wavelet_nlm_denoise(roi_volume)
     # Threshold NL means denoised volume
-    threshold = 2278
-    enhanced_volumes['DESCARGAR_NUEVO_NLMEANS_2278'] = np.uint8(enhanced_volumes['NUEVO_NLMEANS'] > threshold)
+    threshold = 2558
+    enhanced_volumes['DESCARGAR_NUEVO_NLMEANS'] = np.uint8(enhanced_volumes['NUEVO_NLMEANS'] > threshold)
     threshold_tracker['NUEVO_NLMEANS'] = threshold
     return enhanced_volumes, threshold_tracker
 
@@ -658,44 +658,44 @@ def process_original_idea(enhanced_volumes, threshold_tracker):
     
     # Apply gaussian filter
     enhanced_volumes['ORGINAL_IDEA_gaussian'] = gaussian(enhanced_volumes['PRUEBA_roi_plus_gamma_mask'], sigma=0.3)
-    threshold = 0.529
-    enhanced_volumes['DESCARGAR_ORGINAL_IDEA_gaussian_0.529'] = np.uint8(enhanced_volumes['ORGINAL_IDEA_gaussian'] > threshold)
+    threshold = 0.7
+    enhanced_volumes['DESCARGAR_ORGINAL_IDEA_gaussian_0.7'] = np.uint8(enhanced_volumes['ORGINAL_IDEA_gaussian'] > threshold)
     threshold_tracker['ORGINAL_IDEA_gaussian'] = threshold
     
     # Apply gamma correction
     enhanced_volumes['ORGINAL_IDEA_gamma_correction'] = gamma_correction(enhanced_volumes['ORGINAL_IDEA_gaussian'], gamma=2)
     # Threshold gamma corrected volume
-    threshold = 77
-    enhanced_volumes['DESCARGAR_ORGINAL_IDEA_gamma_correction_77'] = np.uint8(enhanced_volumes['ORGINAL_IDEA_gamma_correction'] > threshold)
+    threshold = 130
+    enhanced_volumes['DESCARGAR_ORGINAL_IDEA_gamma_correction'] = np.uint8(enhanced_volumes['ORGINAL_IDEA_gamma_correction'] > threshold)
     threshold_tracker['ORGINAL_IDEA_gamma_correction'] = threshold
     
     # Sharpen gamma corrected volume
     enhanced_volumes['ORGINAL_IDEA_sharpened'] = sharpen_high_pass(enhanced_volumes['ORGINAL_IDEA_gamma_correction'], strenght=0.8)
     # Threshold sharpened volume
-    threshold = 78
-    enhanced_volumes['DESCARGAR_ORGINAL_IDEA_sharpened_78'] = np.uint8(enhanced_volumes['ORGINAL_IDEA_sharpened'] > threshold)
+    threshold = 130
+    enhanced_volumes['DESCARGAR_ORGINAL_IDEA_sharpened_130'] = np.uint8(enhanced_volumes['ORGINAL_IDEA_sharpened'] > threshold)
     threshold_tracker['ORGINAL_IDEA_sharpened'] = threshold
     
 
     # Apply wavelet denoising
     enhanced_volumes['ORIGINAL_IDEA_wavelet'] = wavelet_denoise(enhanced_volumes['ORGINAL_IDEA_sharpened'])
     # Threshold wavelet result
-    threshold = 93
-    enhanced_volumes['DESCARGAR_ORIGINAL_IDEA_wavelet_93'] = np.uint8(enhanced_volumes['ORIGINAL_IDEA_wavelet'] > threshold)
+    threshold = 120
+    enhanced_volumes['DESCARGAR_ORIGINAL_IDEA_wavelet_120'] = np.uint8(enhanced_volumes['ORIGINAL_IDEA_wavelet'] > threshold)
     threshold_tracker['ORIGINAL_IDEA_wavelet'] = threshold
     
     # Apply gaussian filter
     enhanced_volumes['ORGINAL_IDEA_gaussian_2'] = gaussian(enhanced_volumes['ORGINAL_IDEA_sharpened'], sigma=0.4)
     # Threshold gaussian filtered volume
-    threshold = 0.315
-    enhanced_volumes['DESCARGAR_ORGINAL_IDEA_gaussian_2_0.315'] = np.uint8(enhanced_volumes['ORGINAL_IDEA_gaussian_2'] > threshold)
+    threshold = 0.4
+    enhanced_volumes['DESCARGAR_ORGINAL_IDEA_gaussian_2_0.4'] = np.uint8(enhanced_volumes['ORGINAL_IDEA_gaussian_2'] > threshold)
     threshold_tracker['ORGINAL_IDEA_gaussian_2'] = threshold
     
     # Apply gamma correction
     enhanced_volumes['ORIGINAL_IDEA_GAMMA_2'] = gamma_correction(enhanced_volumes['ORGINAL_IDEA_gaussian_2'], gamma=1.4)
     # Threshold gamma corrected volume
-    threshold = 55
-    enhanced_volumes['DESCARGAR_ORIGINAL_IDEA_GAMMA_2_55'] = np.uint8(enhanced_volumes['ORIGINAL_IDEA_GAMMA_2'] > threshold)
+    threshold = 75
+    enhanced_volumes['DESCARGAR_ORIGINAL_IDEA_GAMMA_2_75'] = np.uint8(enhanced_volumes['ORIGINAL_IDEA_GAMMA_2'] > threshold)
     threshold_tracker['ORIGINAL_IDEA_GAMMA_2'] = threshold
     
     # Apply top-hat transformation
@@ -704,8 +704,8 @@ def process_original_idea(enhanced_volumes, threshold_tracker):
     tophat_og = cv2.morphologyEx(enhanced_volumes['ORGINAL_IDEA_gaussian_2'], cv2.MORPH_TOPHAT, kernel_og)
     enhanced_volumes['OG_tophat_1'] = cv2.addWeighted(enhanced_volumes['ORGINAL_IDEA_gaussian_2'], 1, tophat_og, 2, 0)
     # Threshold top-hat result
-    threshold = 0.318
-    enhanced_volumes['DESCARGAR_OG_tophat_1_0.318'] = np.uint8(enhanced_volumes['OG_tophat_1'] > threshold)
+    threshold = 0.518
+    enhanced_volumes['DESCARGAR_OG_tophat_1'] = np.uint8(enhanced_volumes['OG_tophat_1'] > threshold)
     threshold_tracker['OG_tophat_1'] = threshold
     
     return enhanced_volumes, threshold_tracker
@@ -717,8 +717,8 @@ def process_first_try(enhanced_volumes, roi_volume, threshold_tracker):
     
     # Apply gaussian filter
     enhanced_volumes['FT_gaussian'] = gaussian(roi_volume, sigma=0.3)
-    threshold = 2267
-    enhanced_volumes['DESCARGAR_FT_gaussian_2267'] = np.uint8(enhanced_volumes['FT_gaussian'] > threshold)
+    threshold = 2527
+    enhanced_volumes['DESCARGAR_FT_gaussian'] = np.uint8(enhanced_volumes['FT_gaussian'] > threshold)
     threshold_tracker['FT_gaussian'] = threshold
     
     # Apply top-hat transformation
@@ -729,56 +729,56 @@ def process_first_try(enhanced_volumes, roi_volume, threshold_tracker):
     # Subtract gaussian from top-hat
     enhanced_volumes['FT_RESTA_TOPHAT_GAUSSIAN'] = enhanced_volumes['FT_tophat_1'] - gaussian(roi_volume, sigma=0.8)
     # Threshold subtracted volume
-    threshold = 1006
-    enhanced_volumes['DESCARGAR_FT_RESTA_TOPHAT_GAUSSIAN_1006'] = np.uint(enhanced_volumes['FT_RESTA_TOPHAT_GAUSSIAN'] > threshold)
+    threshold = 1060
+    enhanced_volumes['DESCARGAR_FT_RESTA_TOPHAT_GAUSSIAN_1060'] = np.uint(enhanced_volumes['FT_RESTA_TOPHAT_GAUSSIAN'] > threshold)
     threshold_tracker['FT_RESTA_TOPHAT_GAUSSIAN'] = threshold
     
     # Apply gamma correction
     enhanced_volumes['FT_gamma_correction'] = gamma_correction(enhanced_volumes['FT_gaussian'], gamma=5)
-    threshold = 111
-    enhanced_volumes['DESCARGAR_FT_gamma_correction_111'] = np.uint8(enhanced_volumes['FT_gamma_correction'] > threshold)
+    threshold = 120
+    enhanced_volumes['DESCARGAR_FT_gamma_correction'] = np.uint8(enhanced_volumes['FT_gamma_correction'] > threshold)
     threshold_tracker['FT_gamma_correction'] = threshold
 
     
     # Sharpen gamma corrected volume
     enhanced_volumes['FT_sharpened'] = sharpen_high_pass(enhanced_volumes['FT_gamma_correction'], strenght=0.4)
-    threshold= 111
-    enhanced_volumes['DESCARGAR_FT_sharpened_111'] = np.uint8(enhanced_volumes['FT_sharpened'] > threshold)
+    threshold= 118
+    enhanced_volumes['DESCARGAR_FT_sharpened'] = np.uint8(enhanced_volumes['FT_sharpened'] > threshold)
     threshold_tracker['FT_sharpened'] = threshold
 
     
     # Apply gaussian filter
     enhanced_volumes['FT_gaussian_2'] = gaussian(enhanced_volumes['FT_sharpened'], sigma=0.4)
     # Threshold gaussian filtered volume
-    threshold = 0.245
-    enhanced_volumes['DESCARGAR_FT_gaussian_2_0.245'] = np.uint8(enhanced_volumes['FT_gaussian_2'] > threshold)
+    threshold = 0.486
+    enhanced_volumes['DESCARGAR_FT_gaussian_2_0.486'] = np.uint8(enhanced_volumes['FT_gaussian_2'] > threshold)
     threshold_tracker['FT_gaussian_2'] = threshold
     
     # Apply gamma correction
     enhanced_volumes['FT_gamma_2'] = gamma_correction(enhanced_volumes['FT_gaussian_2'], gamma=1.2)
     # Threshold gamma corrected volume
-    threshold = 58
-    enhanced_volumes['DESCARGAR_FT_GAMMA_2_112'] = np.uint8(enhanced_volumes['FT_gamma_2'] > threshold)
+    threshold = 121
+    enhanced_volumes['DESCARGAR_FT_GAMMA_2'] = np.uint8(enhanced_volumes['FT_gamma_2'] > threshold)
     threshold_tracker['FT_gamma_2'] = threshold
 
     # Apply opening operation
     enhanced_volumes['FT_opening'] = morph_operations(enhanced_volumes['FT_gamma_2'], iterations=2, kernel_shape='cross')
-    threshold = 109
-    enhanced_volumes['DESCARGAR_FT_OPENING_109'] = np.uint8(enhanced_volumes['FT_opening'] > threshold)
+    threshold = 100
+    enhanced_volumes['DESCARGAR_FT_OPENING'] = np.uint8(enhanced_volumes['FT_opening'] > threshold)
     threshold_tracker['FT_opening'] = threshold
 
     
     # Apply closing operation
     enhanced_volumes['FT_closing'] = morph_operations(enhanced_volumes['FT_opening'], operation='close')
-    threshold = 49
-    enhanced_volumes['DESCARGAR_FT_CLOSING_49'] = np.uint8(enhanced_volumes['FT_closing'] > threshold)
+    threshold = 100
+    enhanced_volumes['DESCARGAR_FT_CLOSING'] = np.uint8(enhanced_volumes['FT_closing'] > threshold)
     threshold_tracker['FT_closing'] = threshold
 
     # Apply erosion
     enhanced_volumes['FT_erode_2'] = morphological_operation(enhanced_volumes['FT_closing'], operation='erode', kernel_size=1)
     # Threshold eroded volume
-    threshold = 82
-    enhanced_volumes['DESCARGAR_FT_ERODE_2_82'] = np.uint8(enhanced_volumes['FT_erode_2'] > threshold)
+    threshold = 120
+    enhanced_volumes['DESCARGAR_FT_ERODE_2'] = np.uint8(enhanced_volumes['FT_erode_2'] > threshold)
     threshold_tracker['FT_erode_2'] = threshold
     
     # Apply top-hat transformation
@@ -786,8 +786,8 @@ def process_first_try(enhanced_volumes, roi_volume, threshold_tracker):
     tophat = cv2.morphologyEx(enhanced_volumes['FT_gaussian_2'], cv2.MORPH_TOPHAT, kernel)
     enhanced_volumes['FT_tophat'] = cv2.addWeighted(enhanced_volumes['FT_gaussian_2'], 1, tophat, 2, 0)
     # Threshold top-hat result
-    threshold = 0.275
-    enhanced_volumes['DESCARGAR_FT_TOPHAT_0.275'] = np.uint8(enhanced_volumes['FT_tophat'] > threshold)
+    threshold = 0.484
+    enhanced_volumes['DESCARGAR_FT_TOPHAT'] = np.uint8(enhanced_volumes['FT_tophat'] > threshold)
     threshold_tracker['FT_tophat'] = threshold
     
     # Apply gaussian filter
@@ -956,7 +956,7 @@ def enhance_ctp(inputVolume, inputROI=None, methods=None, outputDir=None, collec
 inputVolume = slicer.util.getNode('7_CTp.3D')  
 inputROI = slicer.util.getNode('patient7_resampled_sy_mask')  # Brain Mask 
 # Output directory
-outputDir = r"C:\Users\rocia\Downloads\TFG\Cohort\Enhance_ctp_tests\P7\TH45_histograms"
+outputDir = r"C:\Users\rocia\Downloads\TFG\Cohort\Enhance_ctp_tests\P7\TH45_histograms_FILTERED"
 # Run the enhancement function
 enhancedVolumeNodes = enhance_ctp(inputVolume, inputROI, methods='all', outputDir=outputDir, collect_histograms=True, train_model=False)
 # Print the enhanced volume nodes
