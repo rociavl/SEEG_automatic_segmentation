@@ -286,164 +286,10 @@ def collect_histogram_data(enhanced_volumes, threshold_tracker, outputDir=None):
     # Save all histogram features to CSV
     features_df = pd.DataFrame.from_dict(hist_features, orient='index')
     features_df.to_csv(os.path.join(outputDir, 'histogram_features.csv'))
-    
-    # Create a comprehensive report with all histograms
-    create_histogram_report(histogram_data, threshold_tracker, hist_features, outputDir)
+
     
     return histogram_data
 
-def create_histogram_report(histogram_data, threshold_tracker, hist_features, outputDir):
-    """
-    Create a comprehensive report with all histograms with improved visualization.
-    """
-    import matplotlib.pyplot as plt
-    import os
-    import numpy as np
-    from matplotlib import cm
-    from matplotlib.colors import Normalize
-    
-    # Create plots directory
-    plots_dir = os.path.join(outputDir, "combined_plots")
-    if not os.path.exists(plots_dir):
-        os.makedirs(plots_dir)
-    
-    # Group methods by approach
-    approaches = {
-        'Original CTP': ['OG_volume_array', 'OG_gaussian_volume_og', 'OG_gamma_volume_og', 'OG_sharpened'],
-        'ROI with Gamma': ['PRUEBA_roi_plus_gamma_mask', 'PRUEBA_roi_plus_gamma_mask_clahe', 'PRUEBA_WAVELET_NL'],
-        'ROI Only': ['roi_volume', 'wavelet_only_roi', 'gamma_only_roi', 'sharpened_wavelet_roi', 'sharpened_roi_only_roi', 'LOG_roi'],
-        'ROI Plus Gamma After': ['2_gaussian_volume_roi', '2_gamma_correction', '2_tophat', '2_sharpened', '2_LOG', '2_wavelet_roi', '2_erode', '2_gaussian_2', '2_sharpening_2_trial'],
-        'Wavelet ROI': ['NUEVO_NLMEANS'],
-        'Original Idea': ['ORGINAL_IDEA_gaussian', 'ORGINAL_IDEA_gamma_correction', 'ORGINAL_IDEA_sharpened', 'ORIGINAL_IDEA_SHARPENED_OPENING', 'ORIGINAL_IDEA_wavelet', 'ORGINAL_IDEA_gaussian_2', 'ORIGINAL_IDEA_GAMMA_2', 'OG_tophat_1'],
-        'First Try': ['FT_gaussian', 'FT_tophat_1', 'FT_RESTA_TOPHAT_GAUSSIAN', 'FT_gamma_correction', 'FT_sharpened', 'FT_gaussian_2', 'FT_gamma_2', 'FT_opening', 'FT_closing', 'FT_erode_2', 'FT_tophat', 'FT_gaussian_3']
-    }
-    
-    # Define a better color palette
-    colormap = cm.get_cmap('viridis', 10)
-    
-    # Plot histograms by approach
-    for approach_name, methods in approaches.items():
-        # Filter available methods
-        available_methods = [m for m in methods if m in histogram_data]
-        
-        if not available_methods:
-            continue
-            
-        # Create plot with subplots for this approach - adaptive size based on number of methods
-        num_methods = len(available_methods)
-        cols = min(3, num_methods)  # Maximum 3 columns
-        rows = (num_methods + cols - 1) // cols  # Ceiling division
-        
-        # Adaptive figure size - width based on columns, height based on rows
-        fig_width = 6 * cols
-        fig_height = 4 * rows
-        
-        fig, axes = plt.subplots(rows, cols, figsize=(fig_width, fig_height))
-        fig.suptitle(f'Histograms for {approach_name} Approach', fontsize=16)
-        
-        # Flatten axes for easy indexing
-        if rows == 1 and cols == 1:
-            axes = np.array([[axes]])
-        elif rows == 1:
-            axes = axes.reshape(1, -1)
-        elif cols == 1:
-            axes = axes.reshape(-1, 1)
-        axes_flat = axes.flatten()
-        
-        # Plot each method
-        for i, method in enumerate(available_methods):
-            if i < len(axes_flat):
-                data = histogram_data[method]
-                hist = data['hist']
-                bin_centers = data['bin_centers']
-                
-                # Calculate mean and median for annotations
-                if 'mean' in hist_features[method]:
-                    mean_val = hist_features[method]['mean']
-                    median_val = hist_features[method]['median']
-                else:
-                    # Approximate from histogram if not available
-                    total = np.sum(hist)
-                    cumsum = np.cumsum(hist)
-                    median_idx = np.argmin(np.abs(cumsum - total/2))
-                    median_val = bin_centers[median_idx]
-                    mean_val = np.sum(bin_centers * hist) / total
-                
-                # Normalize histogram for better visualization
-                normalized_hist = hist / np.max(hist)
-                
-                # Plot with better styling
-                ax = axes_flat[i]
-                color = colormap(i / len(available_methods))
-                ax.plot(bin_centers, normalized_hist, color=color, linewidth=2)
-                
-                # Add semitransparent fill under curve
-                ax.fill_between(bin_centers, normalized_hist, alpha=0.3, color=color)
-                
-                # Use log scale for y-axis to better see differences
-                ax.set_yscale('log')
-                ax.set_ylim(bottom=1e-8)  # Minimum value for log scale
-                
-                # Add grid for easier reading
-                ax.grid(True, alpha=0.3, linestyle='--')
-                
-                # Set title and labels
-                ax.set_title(method, fontsize=12, fontweight='bold')
-                ax.set_xlabel('Pixel Value', fontsize=10)
-                ax.set_ylabel('Normalized Frequency (log)', fontsize=10)
-                
-                # Add threshold line if available
-                if method in threshold_tracker:
-                    threshold = threshold_tracker[method]
-                    ax.axvline(x=threshold, color='r', linestyle='-', 
-                               linewidth=2, label=f'Threshold = {threshold:.2f}')
-                
-                # Add mean and median lines
-                ax.axvline(x=mean_val, color='green', linestyle='--', 
-                           linewidth=1.5, label=f'Mean = {mean_val:.2f}')
-                ax.axvline(x=median_val, color='blue', linestyle=':', 
-                           linewidth=1.5, label=f'Median = {median_val:.2f}')
-                
-                # Add legend
-                ax.legend(loc='upper right', fontsize=8)
-        
-        # Hide unused subplots
-        for j in range(num_methods, len(axes_flat)):
-            axes_flat[j].set_visible(False)
-        
-        plt.tight_layout(rect=[0, 0, 1, 0.96])  
-        plt.subplots_adjust(hspace=0.4, wspace=0.3)  
-        plt.savefig(os.path.join(plots_dir, f'histograms_{approach_name.replace(" ", "_")}.png'), dpi=300)
-        plt.close()
-    
-    # Enhanced plot for comparing all methods with thresholds
-    threshold_methods = [m for m in threshold_tracker.keys() if m in histogram_data]
-    
-    # Create a heatmap of threshold values for quick comparison
-    if threshold_methods:
-        plt.figure(figsize=(12, len(threshold_methods)/2 + 2))
-        
-        # Get threshold values and sort them
-        thresholds = [threshold_tracker[m] for m in threshold_methods]
-        sorted_indices = np.argsort(thresholds)
-        sorted_methods = [threshold_methods[i] for i in sorted_indices]
-        sorted_thresholds = [thresholds[i] for i in sorted_indices]
-        
-        # Create horizontal bar chart of thresholds
-        bars = plt.barh(sorted_methods, sorted_thresholds, height=0.6)
-        
-        # Add threshold values as text
-        for i, bar in enumerate(bars):
-            plt.text(bar.get_width() + 0.5, bar.get_y() + bar.get_height()/2, 
-                     f'{sorted_thresholds[i]:.2f}', 
-                     va='center', fontsize=10)
-        
-        plt.xlabel('Threshold Value', fontsize=12)
-        plt.title('Comparison of Threshold Values Across Methods', fontsize=14)
-        plt.grid(True, axis='x', alpha=0.3, linestyle='--')
-        plt.tight_layout()
-        plt.savefig(os.path.join(plots_dir, 'threshold_comparison_chart.png'), dpi=300)
-        plt.close()
 
 def process_original_ctp(enhanced_volumes, volume_array, threshold_tracker, model_path=None):
     """Process the original CTP volume with basic enhancement techniques"""
@@ -896,7 +742,7 @@ def process_first_try(enhanced_volumes, roi_volume, threshold_tracker, model_pat
     threshold_tracker['FT_gaussian_3'] = threshold
     return enhanced_volumes, threshold_tracker
 
-def enhance_ctp(inputVolume, inputROI=None, methods=None, outputDir=None, collect_histograms=True, train_model=False, model_path=None):
+def enhance_ctp(inputVolume, inputROI=None, methods=None, outputDir=None, collect_histograms=True, train_model=False, model_path=None, descargar_only=False):
     """
     Enhance CT perfusion images using different image processing approaches.
     
@@ -916,6 +762,8 @@ def enhance_ctp(inputVolume, inputROI=None, methods=None, outputDir=None, collec
         Whether to train a threshold prediction model
     model_path : str, optional
         Path to trained model for threshold prediction
+    descargar_only : bool, optional
+        If True, only processes and saves DESCARGAR_ volumes
         
     Returns:
     --------
@@ -1019,18 +867,12 @@ def enhance_ctp(inputVolume, inputROI=None, methods=None, outputDir=None, collec
             f.write(f"{method}: {threshold}\n")
     
     print(f"Saved thresholds to: {threshold_file}")
-    
-    # Collect histogram data if requested
-    if collect_histograms:
-        histogram_data = collect_histogram_data(enhanced_volumes, threshold_tracker, outputDir)
-        print(f"Saved histogram data to: {os.path.join(outputDir, 'histograms')}")
         
-        # Train threshold prediction model if requested
-        if train_model:
-            model, scaler = train_threshold_model(outputDir)
-            if model is not None:
-                print(f"Saved threshold prediction model to: {os.path.join(outputDir, 'model')}")
-    
+    # Filter volumes if descargar_only is True
+    if descargar_only:
+        enhanced_volumes = {k: v for k, v in enhanced_volumes.items() if k.startswith('DESCARGAR_')}
+        print("Processing only DESCARGAR_ volumes")
+
     # Process each enhanced volume
     enhancedVolumeNodes = {}
     for method_name, enhanced_image in enhanced_volumes.items():
@@ -1053,14 +895,14 @@ def enhance_ctp(inputVolume, inputROI=None, methods=None, outputDir=None, collec
 
 # Main execution
 start_time = time.time()
-inputVolume = slicer.util.getNode('7_CTp.3D')  
-inputROI = slicer.util.getNode('patient7_resampled_sy_mask')  # Brain Mask 
+inputVolume = slicer.util.getNode('8_CTp.3D')  
+inputROI = slicer.util.getNode('patient8_mask_5')  # Brain Mask 
 # Output directory
-outputDir = r"C:\Users\rocia\Downloads\TFG\Cohort\Enhance_ctp_tests\P7\TH45_histograms_ml_outliers_wo_P7"
+outputDir = r"C:\Users\rocia\Downloads\TFG\Cohort\Enhance_ctp_tests\P8\TH45_histograms_ml_outliers_wo_P8_faster_only_descargar"
 # Path to trained model
-model_path = r"C:\Users\rocia\Downloads\random_forest_model_wo_P7 (2).joblib"
+model_path = r"C:\Users\rocia\Downloads\random_forest_model_outliers_wo_P8.joblib"
 
-# Run the enhancement function with model-based threshold prediction
+# Run the enhancement function with model-based threshold prediction and descargar_only=True
 enhancedVolumeNodes = enhance_ctp(
     inputVolume, 
     inputROI, 
@@ -1068,7 +910,8 @@ enhancedVolumeNodes = enhance_ctp(
     outputDir=outputDir, 
     collect_histograms=True, 
     train_model=False,
-    model_path=model_path
+    model_path=model_path,
+    descargar_only=True  # Set to True to only process DESCARGAR_ volumes
 )
 
 
@@ -1085,5 +928,4 @@ hours = int(elapsed_time // 3600)
 minutes = int((elapsed_time % 3600) // 60)
 seconds = elapsed_time % 60
 print(f"Enhancement process completed in {hours}h {minutes}m {seconds:.2f}s")
-
-#exec(open(r'C:\Users\rocia\AppData\Local\slicer.org\Slicer 5.6.2\SEEG_module\SEEG_masking\Threshold_mask\new_enhance_ml.py').read())
+#exec(open(r'C:\Users\rocia\AppData\Local\slicer.org\Slicer 5.6.2\SEEG_module\SEEG_masking\Threshold_mask\new_enhance_ml_faster.py').read())

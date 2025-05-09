@@ -86,19 +86,19 @@ def extractFeatures(volumeNode):
         features['non_zero_skewness'] = 0
         features['non_zero_kurtosis'] = 0
     
-    # High-intensity island statistics
-    high_threshold = features['p99']
-    high_values = volume_array[volume_array >= high_threshold]
-    if len(high_values) > 0:
-        features['high_intensity_count'] = len(high_values)
-        features['high_intensity_mean'] = np.mean(high_values)
-        features['high_intensity_max'] = np.max(high_values)
-        features['high_intensity_ratio'] = len(high_values) / volume_array.size
-    else:
-        features['high_intensity_count'] = 0
-        features['high_intensity_mean'] = 0
-        features['high_intensity_max'] = 0
-        features['high_intensity_ratio'] = 0
+    # # High-intensity island statistics
+    # high_threshold = features['p99']
+    # high_values = volume_array[volume_array >= high_threshold]
+    # if len(high_values) > 0:
+    #     features['high_intensity_count'] = len(high_values)
+    #     features['high_intensity_mean'] = np.mean(high_values)
+    #     features['high_intensity_max'] = np.max(high_values)
+    #     features['high_intensity_ratio'] = len(high_values) / volume_array.size
+    # else:
+    #     features['high_intensity_count'] = 0
+    #     features['high_intensity_mean'] = 0
+    #     features['high_intensity_max'] = 0
+    #     features['high_intensity_ratio'] = 0
     
     # Find peaks (ignoring the zero peak if it's dominant)
     peaks = []

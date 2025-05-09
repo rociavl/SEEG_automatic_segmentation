@@ -356,8 +356,8 @@ class MaskSelector:
 # Main execution function
 def main():
     # Paths
-    mask_folder_path = r"C:\Users\rocia\Downloads\TFG\Cohort\Enhance_ctp_tests\P7\TH45_histograms_ml\descargar"
-    output_dir = r"C:\Users\rocia\Downloads\TFG\Cohort\Enhance_ctp_tests\P7_fused_greedy_ML"
+    mask_folder_path = r"C:\Users\rocia\Downloads\TFG\Cohort\Enhance_ctp_tests\P1\TH45_histograms_ml_outliers_wo_p1\descargar"
+    output_dir = r"C:\Users\rocia\Downloads\TFG\Cohort\Enhance_ctp_tests\P1_fused_greedy_ml_threshold"
     
     # Initialize the mask selector
     selector = MaskSelector(mask_folder_path, output_dir)
@@ -369,14 +369,14 @@ def main():
     all_mask_names = list(selector.masks.keys())
     
     # Create and save the fused mask from all masks
-    fused_all = selector.create_fused_mask(all_mask_names, "P7_mask_all_fused")
+    fused_all = selector.create_fused_mask(all_mask_names, "P1_mask_all_fused_ml")
     
     # Create individual fused masks for the 10 selected masks
     for i, mask_name in enumerate(selected_masks, 1):
-        selector.save_mask(selector.masks[mask_name], f"P7_mask_{i}_fused")
+        selector.save_mask(selector.masks[mask_name], f"P1_mask_{i}_fused_ml")
     
     # Create and save the fused mask from selected masks
-    fused_selected = selector.create_fused_mask(selected_masks, "P7_mask_selected_fused")
+    fused_selected = selector.create_fused_mask(selected_masks, "P1_mask_selected_fused_ml")
     
     # Create comparison plots
     selector.create_comparison_plots(all_mask_names, selected_masks, fused_all, fused_selected)
@@ -389,4 +389,4 @@ if __name__ == "__main__":
     main()
 
 
-#exec(open('C:/Users/rocia/AppData/Local/slicer.org/Slicer 5.6.2/SEEG_module/SEEG_masking/masks_fusion.py').read())
+#exec(open('C:\Users\rocia\AppData\Local\slicer.org\Slicer 5.6.2\SEEG_module\SEEG_masking\Masks_ensemble\masks_fusion.py').read())
