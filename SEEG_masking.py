@@ -1,12 +1,33 @@
 import logging
 import os
 from typing import Annotated, Optional
+import sys
 
 import slicer.util
 import vtk
 import numpy as np
-import vtk.util.numpy_support
 import time
+
+# Add the Brain_mask_methods directory to the Python path
+module_dir = os.path.dirname(__file__)
+brain_mask_methods_dir = os.path.join(module_dir, "Brain_mask_methods")
+if brain_mask_methods_dir not in sys.path:
+    sys.path.append(brain_mask_methods_dir)
+
+# Import the BrainMaskExtractor from the correct module
+from brain_mask_extractor_otsu import BrainMaskExtractor # import from Brain_mask_methods
+
+# Add the Threshold_mask directory to the Python path
+threshold_mask_dir = os.path.join(module_dir, "Threshold_mask")
+if threshold_mask_dir not in sys.path:
+    sys.path.append(threshold_mask_dir)
+
+# Import CTPEnhancer from enhance_ctp
+from Threshold_mask.ctp_enhancer import CTPEnhancer
+
+
+# Define path to the model
+MODEL_PATH = os.path.join(module_dir, "models", "random_forest_modelP1.joblib")
 
 
 import slicer
@@ -19,15 +40,7 @@ from slicer.parameterNodeWrapper import (
     WithinRange)
 
 from slicer import vtkMRMLScalarVolumeNode
-from skimage import (exposure, filters, feature, morphology)
-from skimage import img_as_ubyte, measure
-import cv2
-from skimage.measure import label, regionprops
 import qt
-from enhance_ctp import enhance_ctp
-from enhance_ctp import add_more_filter
-from scipy import ndimage
-
 
 
 #
@@ -121,18 +134,12 @@ class SEEG_maskingParameterNode:
     The parameters needed by module.
 
     inputVolume - The volume to threshold.
-    imageThreshold - The value at which to threshold the input volume.
-    invertThreshold - If true, will invert the threshold.
-    thresholdedVolume - The output volume that will contain the thresholded volume.
-    invertedVolume - The output volume that will contain the inverted thresholded volume.
+    outputVolume - The output volume that will contain the thresholded volume.
     """
 
     inputVolume: vtkMRMLScalarVolumeNode
-    #imageThreshold: Annotated[float, WithinRange(-100, 500)] = 100
-    #invertThreshold: bool = False
+    inputVolumeCT: vtkMRMLScalarVolumeNode 
     outputVolume: vtkMRMLScalarVolumeNode
-    #invertedVolume: vtkMRMLScalarVolumeNode
-    inputROI: vtkMRMLScalarVolumeNode
 
 
 
@@ -153,6 +160,7 @@ class SEEG_maskingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         self.logic = None
         self._parameterNode = None
         self._parameterNodeGuiTag = None
+        self.outputVolumeNode = None  # Track the generated mask volume
 
     def setup(self) -> None:
         """Called when the user opens the module the first time and the widget is initialized."""
@@ -181,22 +189,10 @@ class SEEG_maskingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
 
         # Buttons
         self.ui.applyButton.connect("clicked(bool)", self.onApplyButton)
-        #self.ui.newButton_save.connect("clicked(bool)", self.onNewButton_save) # New Button
-        #self.ui.inputSelector_saveMaskAI.setMRMLScene(slicer.mrmlScene)
         
         self.ui.saveButton.connect("clicked(bool)", self.onSaveButton) # Save Button
         # Set up the Save button
         self.ui.saveButton.setText("Save Mask") # Save Button
-
-        # Set up the CTP button
-        self.ui.pushButton_ctp.connect('clicked(bool)', self.onCTPButton) # Push Button for CTP
-        # Set up input selector for CTP
-        self.ui.inputSelector_ctp.setMRMLScene(slicer.mrmlScene)
-        self.ui.inputSelector_ROI_norm.setMRMLScene(slicer.mrmlScene)
-
-        self.ui.pushButton_filters.connect('clicked(bool)', self.onApplyFiltersButton)
-        self.ui.inputSelector_filter.setMRMLScene(slicer.mrmlScene)
-
 
         # Make sure parameter node is initialized (needed for module reload)
         self.initializeParameterNode()
@@ -260,48 +256,50 @@ class SEEG_maskingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
             self._checkCanApply()
 
     
-    # check if I have to put more boxes!!
     def _checkCanApply(self, caller=None, event=None) -> None:
         """  Check if the input volume is selected. """
         if self._parameterNode and self._parameterNode.inputVolume:
             self.ui.applyButton.toolTip = _("Compute output volume")
             self.ui.applyButton.enabled = True
-            self.ui.pushButton_ctp.toolTip = _("Compute output volume")
-            self.ui.pushButton_ctp.enabled = True
         else:
             self.ui.applyButton.toolTip = _("Select input volume nodes")
             self.ui.applyButton.enabled = False
-            self.ui.pushButton_ctp.toolTip = _("Select input volume nodes")
-            self.ui.pushButton_ctp.enabled = False
 
     # Handle 'Apply' button click event (run processing)
     def onApplyButton(self) -> None:
         """Run processing when user clicks 'Apply' button."""
         with slicer.util.tryWithErrorDisplay(_("Failed to compute results."), waitCursor=True):
-            # Process the input and create the mask (but don't save it yet)
-            #self.logic.process(self.ui.inputSelector.currentNode(), self.ui.inputSelector.currentNode(), self.ui.invertOutputCheckBox.checked)
-            self.outputVolumeNode = self.logic.process(self.ui.inputSelector.currentNode())
-            # Optionally, update the UI to indicate the mask was created
-            slicer.util.infoDisplay("Mask created! Now, select a location to save the mask.")
-
-    # def onNewButton_save(self) -> None:
-    #     """Create mask and save it when user clicks the button"""
-    #     with slicer.util.tryWithErrorDisplay(_("Failed to compute results."), waitCursor = True):
-    #         self.outputVolumeNode = self.logic.brain_mask_modified(self.ui.inputSelector_saveMaskAI.currentNode())
-    #         print("Brain mask created and saved ")
-
+            input_volume_node = self.ui.inputSelector.currentNode()
+            input_volume_node_CT = self.ui.inputSelectorCT.currentNode()
+            
+            # Generate brain mask
+            self.outputVolumeNode = self.logic.process(input_volume_node)
+            
+            # Initialize CTPEnhancer with model
+            ctp_enhancer = CTPEnhancer()
+            try:
+                # Use the predefined MODEL_PATH
+                enhanced_volumes = ctp_enhancer.enhance_ctp(
+                    inputVolume=input_volume_node_CT,
+                    inputROI=self.outputVolumeNode,  # Brain mask as ROI
+                    model_path=MODEL_PATH  # Pass model path
+                )
+                slicer.util.infoDisplay(f"Generated {len(enhanced_volumes)} enhanced volumes.")
+            except FileNotFoundError as e:
+                slicer.util.errorDisplay(f"Model file not found: {MODEL_PATH}")
+                logging.error(str(e))
 
     
     def onSaveButton(self) -> None:
         """Handle 'Save Mask' button click event."""
-        print("✅ Save button clicked!")  # Debugging print
+        logging.info("Save button clicked!")
 
         if not self.outputVolumeNode:
-            slicer.util.errorDisplay("❌ No mask to save! Apply first.")
-            print("❌ No mask to save!")
+            slicer.util.errorDisplay("No mask to save! Apply first.")
+            logging.error("No mask to save!")
             return
 
-        print(f"🛠️ Saving mask: {self.outputVolumeNode.GetName()}")  # Debugging print
+        logging.info(f"Saving mask: {self.outputVolumeNode.GetName()}")
 
         # Create a file dialog
         fileDialog = qt.QFileDialog()
@@ -313,153 +311,18 @@ class SEEG_maskingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         # Show file dialog and get selected folder
         if fileDialog.exec_():
             savePath = fileDialog.selectedFiles()[0]
-            print(f"📂 Selected save path: {savePath}")  # Debugging print
+            logging.info(f"Selected save path: {savePath}")
 
             success = slicer.util.saveNode(self.outputVolumeNode, savePath)
 
             if success:
-                slicer.util.infoDisplay(f"✅ Mask saved to:\n{savePath}")
-                print(f"✅ Mask saved successfully at: {savePath}")  # Debugging print
+                slicer.util.infoDisplay(f"Mask saved to:\n{savePath}")
+                logging.info(f"Mask saved successfully at: {savePath}")
             else:
-                slicer.util.errorDisplay("❌ Failed to save mask")
-                print("❌ Failed to save mask")  # Debugging print
+                slicer.util.errorDisplay("Failed to save mask")
+                logging.error("Failed to save mask")
 
 
-    def saveMaskToFile(self, maskVolumeNode: slicer.vtkMRMLScalarVolumeNode, filePath: str) -> None:
-        """Save the output volume (mask) to the given file path."""
-        
-        if not maskVolumeNode:
-            slicer.util.errorDisplay("No output volume available.")
-            return
-
-        # Ensure file path is valid
-        if not filePath or not filePath.strip():
-            slicer.util.errorDisplay("Invalid file path.")
-            return
-
-        # Save the mask using Slicer's saveNode function
-        success = slicer.util.saveNode(maskVolumeNode, filePath)
-        
-        if not success:
-            slicer.util.errorDisplay(f"Failed to save output volume to {filePath}")
-        else:
-            slicer.util.infoDisplay(f"Mask saved successfully at: {filePath}")
-
-    
-    def onCTPButton(self) -> None:
-        """Handle 'CTP' button click event."""
-        
-        # Get selected nodes from the UI
-        inputVolume = self.ui.inputSelector_ctp.currentNode()
-        inputROI = self.ui.inputSelector_ROI_norm.currentNode()
-
-        # Optional: Get additional inputs for methods and outputDir
-        methods = 'all'  # Placeholder, will be replaced by actual UI input later
-        outputDir = r'C:\\Users\\rocia\\Downloads\\TFG\\Cohort\\Enhance_ctp_tests'  
-        
-        # Validate inputs
-        if not inputVolume or not inputROI:
-            slicer.util.errorDisplay("Please select both the input volume and the ROI.")
-            return
-        
-
-        # Call the logic function from the logic class
-        enhancedVolumeNodes = self.logic.enhance_ctp_logic(inputVolume, inputROI, methods, outputDir)
-
-        # Handle the returned enhancedVolumeNodes dictionary (which contains all enhanced volume nodes)
-        if enhancedVolumeNodes:
-            # Loop over all the enhanced volume nodes (stored in the dictionary)
-            for method_name, enhancedVolumeNode in enhancedVolumeNodes.items():
-                # Check if enhancedVolumeNode is a valid volume node
-                if enhancedVolumeNode:
-                    # Set the reference active volume for each enhanced volume node
-                    slicer.app.applicationLogic().GetSelectionNode().SetReferenceActiveVolumeID(enhancedVolumeNode.GetID())
-                    slicer.app.applicationLogic().PropagateVolumeSelection()
-                    slicer.app.layoutManager().resetSliceViews()
-                    slicer.app.processEvents()
-
-                    # Optionally, inform the user for each enhancement
-                    slicer.util.infoDisplay(f"Enhanced volume for method '{method_name}' has been created and set as active.")
-                
-        else:
-            slicer.util.errorDisplay("Error: No enhanced volume nodes were returned.")
-
-
-    def onApplyFiltersButton(self) -> None:
-        """Handle 'Apply Filters' button click event with debugging statements."""
-        
-        print("[DEBUG] onApplyFiltersButton triggered")
-
-        # Get the current selected volume from the UI (assuming you have a selector for the volume)
-        inputVolume = self.ui.inputSelector_filter.currentNode()  # Assuming you have a volume selector in your UI
-        
-        if not inputVolume:
-            slicer.util.errorDisplay("Please select a valid volume to apply filters.")
-            print("[ERROR] No input volume selected.")
-            return
-
-        print(f"[DEBUG] Selected input volume: {inputVolume.GetName()}")
-        print(f"[DEBUG] Checkable_filters initialized: {self.ui.Checkable_filters}")
-
-        # Collect the selected filters from the UI
-        try:
-             # Get the checked indexes from the ctkCheckableComboBox
-            checked_indexes = self.ui.Checkable_filters.checkedIndexes()
-            print(f"[DEBUG] Checked filter indexes: {checked_indexes}")
-            selected_items = [index.data() for index in checked_indexes]  # Get selected filters
-            print(f"[DEBUG] Selected filter UI items: {selected_items}")
-        except AttributeError as e:
-            print(f"[ERROR] Could not retrieve selected filters: {e}")
-            slicer.util.errorDisplay("Error retrieving selected filters. Check if Checkable_filters is properly initialized.")
-            return
-
-
-        # Define a mapping of combo box display names to internal filter names
-        filter_names = {
-            "Morphological Operations": "morph_operations",
-            "Canny Edge Detection": "canny_edge",
-            "High Pass Sharpening": "high_pass_sharpening"
-        }
-
-        # Map selected items to internal names
-        selected_filters = [filter_names[item] for item in selected_items if item in filter_names]
-        
-        if not selected_filters:
-            print("[WARNING] No valid filters selected.")
-            slicer.util.infoDisplay("No additional filters selected. The volume will remain unchanged.")
-            return
-
-        print(f"[DEBUG] Mapped selected filters: {selected_filters}")
-
-        # Define the output directory
-        outputDir = r'C:\\Users\\rocia\\Downloads\\TFG\\Cohort\\Enhance_ctp_tests'
-        print(f"[DEBUG] Output directory: {outputDir}")
-
-        # Apply filters by calling the add_more_filter function
-        try:
-            enhancedVolumeNode = add_more_filter(inputVolume, selected_filters, outputDir)
-        except Exception as e:
-            print(f"[ERROR] Failed to apply filters: {e}")
-            slicer.util.errorDisplay(f"Error while applying filters: {e}")
-            return
-
-        if enhancedVolumeNode:
-            try:
-                slicer.app.applicationLogic().GetSelectionNode().SetReferenceActiveVolumeID(enhancedVolumeNode.GetID())
-                slicer.app.applicationLogic().PropagateVolumeSelection()
-                slicer.app.layoutManager().resetSliceViews()
-                slicer.app.processEvents()
-                print("[DEBUG] Enhanced volume set as active.")
-
-                # Inform the user that the filters have been applied and saved
-                slicer.util.infoDisplay("Filters applied successfully to the selected volume.")
-                slicer.util.infoDisplay(f"Filtered volume saved as: {outputDir}\\Enhanced_more_filters_{inputVolume.GetName()}.nrrd")
-            except Exception as e:
-                print(f"[ERROR] Failed to update UI with enhanced volume: {e}")
-                slicer.util.errorDisplay(f"Error updating UI with enhanced volume: {e}")
-        else:
-            print("[ERROR] add_more_filter did not return a valid volume node.")
-            slicer.util.errorDisplay("Error: No enhanced volume was created.")
 #
 # SEEG_maskingLogic
 #
@@ -469,8 +332,8 @@ class SEEG_maskingLogic:
 
     def __init__(self, parent=None):
         """Called when the user opens the module the first time and the widget is initialized."""
-        #ScriptedLoadableModuleLogic.__init__(self)
-        super().__init__() # Call the super class initializer
+        # Initialize the brain mask extractor
+        self.maskExtractor = BrainMaskExtractor()
 
     
     def createParameterNode(self):
@@ -484,191 +347,29 @@ class SEEG_maskingLogic:
         if not node:
             node = self.createParameterNode()
         return SEEG_maskingParameterNode(node)  
-    
-    #Dealing with markups :c
-    def remove_Annotations(self):
-        """Removes invalid annotation and markup nodes from the scene."""
-        nodesToDelete = []
-        
-        for i in range(slicer.mrmlScene.GetNumberOfNodes()):
-            node = slicer.mrmlScene.GetNthNode(i)
-            
 
-            # Check if the node is a Markups node (generic)
-            if node.IsA("vtkMRMLMarkupsNode"):
-                if node.IsA("vtkMRMLMarkupsFiducialNode"):
-                    # Remove empty Markups Fiducial Nodes
-                    if node.GetNumberOfControlPoints() == 0:
-                        nodesToDelete.append(node)
-
-                # Orphaned Annotation Hierarchy Nodes
-                elif node.IsA("vtkMRMLAnnotationHierarchyNode") and not node.GetAssociatedNode():
-                    nodesToDelete.append(node)
-
-        for node in nodesToDelete:
-            slicer.mrmlScene.RemoveNode(node)
-            print(f"Deleted invalid node: {node.GetName()}")
-
-    def process(self,
-                inputVolume: vtkMRMLScalarVolumeNode,
-                #outputVolume: vtkMRMLScalarVolumeNode,
-                #imageThreshold: float,
-                #invert: bool = False,
-                showResult: bool = True) -> vtkMRMLScalarVolumeNode:
+    def process(self, inputVolume: vtkMRMLScalarVolumeNode, showResult: bool = True) -> vtkMRMLScalarVolumeNode:
         """
         Run the processing algorithm.
-        Creates a mask where scalar > 0 is set to 1, otherwise set to 0.
-        :param inputVolume: volume to be thresholded
-        :param outputVolume: output mask volume
-        :param imageThreshold: values above/below this threshold will be set to 1
-        :param invert: if True then values above the threshold will be set to 0, otherwise values below are set to 0
-        :param showResult: show output volume in slice viewers
-        """
+        Creates a mask using the BrainMaskExtractor.
         
+        Parameters:
+        -----------
+        inputVolume : vtkMRMLScalarVolumeNode
+            The input volume to process
+        showResult : bool, optional
+            Whether to show the result in the Slicer viewer (default is True)
+            
+        Returns:
+        --------
+        vtkMRMLScalarVolumeNode
+            The output volume node containing the mask
+        """
         if not inputVolume:
             raise ValueError("Input volume is invalid")
 
-        startTime = time.time()
-        logging.info("Processing started")
-
-
-
-        # Create a new vtkMRMLScalarVolumeNode for the mask and save it
-        maskVolumeNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLScalarVolumeNode")
-        #maskVolumeNode.DeepCopy(inputVolume)
-        maskVolumeNode.SetName(f"Generated Mask_{inputVolume.GetName()}")
-        maskVolumeNode.CopyOrientation(inputVolume)  
-
-
-        
-        if inputVolume.GetImageData():
-            maskVolumeNode.SetAndObserveImageData(inputVolume.GetImageData())
-        # Remove any annotations or markups from the scene   
-        self.remove_Annotations()
-
-        inputImage = maskVolumeNode.GetImageData()
-        # Convert the VTK array to a NumPy array
-        inputArrayVtk = inputImage.GetPointData().GetScalars()
-        inputArray = vtk.util.numpy_support.vtk_to_numpy(inputArrayVtk)
-
-        dims = inputImage.GetDimensions() # No funciona
-
-        smooth_input = filters.gaussian(inputArray, sigma=2)
-        print(f"Min: {inputArray.min()}, Max: {inputArray.max()}, Mean: {inputArray.mean()}")
-
-        
-        # Apply binarization logic: all non-zero values become 1, zero stays as 0
-        thresh = filters.threshold_otsu(smooth_input)
-        
-        maskArray = (inputArray > 20).astype(np.uint8)  
-        maskArray = maskArray.reshape(dims)
-        print("Mask array dtype:", maskArray.dtype)
-        print("Unique values in mask array:", np.unique(maskArray))
-        selem_close = ndimage.generate_binary_structure(3, 1) # 3D structuring element
-        print("Input array shape:", inputArray.shape)
-        print("Mask array shape:", maskArray.shape)
-        print("Selem shape:", selem_close.shape)
-        closed = ndimage.binary_closing(maskArray, structure=selem_close, iterations=6).astype(np.uint8)
-        
-        filled = ndimage.binary_fill_holes(closed).astype(np.uint8)
-        
-        final_flat = filled.ravel()
-  
-
-        # Convert the mask (NumPy array) back to VTK format
-        outputArrayVtk = vtk.util.numpy_support.numpy_to_vtk(final_flat, deep=True, array_type = vtk.VTK_UNSIGNED_CHAR)
-        # Create an output image and set its scalar data
-        #outputImage.GetPointData().SetScalars(outputArrayVtk)
-
-        outputImage = vtk.vtkImageData()
-        outputImage.CopyStructure(inputImage)
-        outputImage.GetPointData().SetScalars(outputArrayVtk)
-        
-        # Set the mask as the image data for the new volume node
-        maskVolumeNode.SetAndObserveImageData(outputImage)
-
-
-        # Ensure the output volume is properly displayed
-        slicer.app.processEvents()  # Ensures the UI of Slicer is updated
-
-
-        if showResult:
-            slicer.app.processEvents()  # Ensure the viewer updates with new data
-
-        stopTime = time.time()
-        logging.info(f"Processing completed in {stopTime - startTime:.2f} seconds")
-
-        return maskVolumeNode
-    
-    # def brain_mask_modified(self, inputVolume: vtkMRMLScalarVolumeNode) -> vtkMRMLScalarVolumeNode:
-    #     """
-    #     Generate a binary brain mask using DeepBrain
-    #     param inputVolume: volume to be masked
-    #     param outputVolume: volume to be used as a mask
-    #     """
-
-
-    #     return brain_mask_modified(self, inputVolume)
-
-
-
-    ### Finding points of contact (creating a mask and enhancing the image) (no funciona aun :c) en al archivo ctp_enhance.py sí
-
-
-    def enhance_ctp_logic(self, inputVolume, inputROI, methods='all', outputDir=None):
-        """
-        Logic function to handle the volume enhancement.
-        :param inputVolume: The input volume to enhance
-        :param inputROI: The input ROI mask for enhancement
-        :param methods: Methods used for enhancement (default 'all')
-        :param outputDir: Directory to save the output (optional)
-        :return: vtkMRMLScalarVolumeNode or None
-        """
-        # Call the enhance_ctp function from the external script
-        enhancedVolumeNode = enhance_ctp(inputVolume, inputROI, methods, outputDir)
-
-        # Handle the result (e.g., update the active volume, reset slice views)
-        if enhancedVolumeNode:
-            slicer.app.applicationLogic().GetSelectionNode().SetReferenceActiveVolumeID(enhancedVolumeNode.GetID())
-            slicer.app.applicationLogic().PropagateVolumeSelection()
-            slicer.app.layoutManager().resetSliceViews()
-            slicer.app.processEvents()
-
-            slicer.util.infoDisplay("Enhancement complete! Mask created!")
-        else:
-            slicer.util.errorDisplay("Enhancement failed. Please check your inputs and try again.")
-        
-        return enhancedVolumeNode
-    
-    def apply_filters_logic(self, enhancedVolume, selected_filters):
-        """
-        Logic function to handle applying additional filters to the enhanced volume.
-        :param enhancedVolume: The enhanced volume after running `enhance_ctp`
-        :param selected_filters: List of filters to apply (e.g., "morph_operations", "canny_edge")
-        :return: vtkMRMLScalarVolumeNode or None
-        """
-        # Call the add_more_filter function from the external script
-        enhancedVolumeNode = add_more_filter(enhancedVolume, selected_filters)
-
-        # Handle the result (e.g., update the active volume, reset slice views)
-        if enhancedVolumeNode:
-            slicer.app.applicationLogic().GetSelectionNode().SetReferenceActiveVolumeID(enhancedVolumeNode.GetID())
-            slicer.app.applicationLogic().PropagateVolumeSelection()
-            slicer.app.layoutManager().resetSliceViews()
-            slicer.app.processEvents()
-
-            slicer.util.infoDisplay("Additional filters applied successfully!")
-        else:
-            slicer.util.errorDisplay("Applying filters failed. Please check your inputs and try again.")
-        
-        return enhancedVolumeNode
-
-    
-
-    
-
-        
-        
+        # Use the brain mask extractor to create the mask
+        return self.maskExtractor.extract_mask(inputVolume, threshold_value=20, show_result=showResult)
 
 
 #
@@ -707,37 +408,24 @@ class SEEG_maskingTest(ScriptedLoadableModuleTest):
         self.delayDisplay("Starting the test")
 
         # Get/create input data
-
         import SampleData
-
         registerSampleData()
         inputVolume = SampleData.downloadSample("SEEG_masking1")
         self.delayDisplay("Loaded test data set")
 
-        inputScalarRange = inputVolume.GetImageData().GetScalarRange()
-        self.assertEqual(inputScalarRange[0], 0)
-        self.assertEqual(inputScalarRange[1], 695)
-
-        outputVolume = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLScalarVolumeNode")
-        threshold = 100
-
         # Test the module logic
-
         logic = SEEG_maskingLogic()
-
-        # Test algorithm with non-inverted threshold
-        logic.process(inputVolume, outputVolume, threshold, True)
-        outputScalarRange = outputVolume.GetImageData().GetScalarRange()
-        self.assertEqual(outputScalarRange[0], inputScalarRange[0])
-        self.assertEqual(outputScalarRange[1], threshold)
-
-        # Test algorithm with inverted threshold
-        logic.process(inputVolume, outputVolume, threshold, False)
-        outputScalarRange = outputVolume.GetImageData().GetScalarRange()
-        self.assertEqual(outputScalarRange[0], inputScalarRange[0])
-        self.assertEqual(outputScalarRange[1], inputScalarRange[1])
+        
+        # Process the input volume
+        outputVolume = logic.process(inputVolume, True)
+        
+        # Check that output volume exists
+        self.assertIsNotNone(outputVolume)
+        
+        # Basic validation that the output is a binary mask (0s and 1s only)
+        outputArray = slicer.util.arrayFromVolume(outputVolume)
+        unique_values = np.unique(outputArray)
+        self.assertTrue(len(unique_values) <= 2, "Mask should only contain binary values")
+        self.assertTrue(np.all(np.isin(unique_values, [0, 1])), "Values should be 0 or 1")
 
         self.delayDisplay("Test passed")
-
-
-    

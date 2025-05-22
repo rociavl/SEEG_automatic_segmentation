@@ -927,12 +927,7 @@ def enhance_ctp(inputVolume, inputROI=None, methods=None, outputDir=None, collec
         histogram_data = collect_histogram_data(enhanced_volumes, threshold_tracker, outputDir)
         print(f"Saved histogram data to: {os.path.join(outputDir, 'histograms')}")
         
-        # Train threshold prediction model if requested
-        if train_model:
-            model, scaler = train_threshold_model(outputDir)
-            if model is not None:
-                print(f"Saved threshold prediction model to: {os.path.join(outputDir, 'model')}")
-    
+
     # Process each enhanced volume
     enhancedVolumeNodes = {}
     for method_name, enhanced_image in enhanced_volumes.items():

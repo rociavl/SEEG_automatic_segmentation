@@ -9,20 +9,23 @@ import os
 from skimage import morphology
 import scipy.spatial.distance as distance
 from scipy.ndimage import binary_dilation, binary_erosion
+import time
 
 CONFIG = {
-    'threshold_value': 2416, #P1: 2240, P4:2340, P5: 2746, P7: 2806, P8> 2416
+    'threshold_value': 2350, #P1: 2240, P4:2340, P5: 2746, P7: 2806, P8> 2416
     'min_region_size': 100,         
     'max_region_size': 800,         
     'morph_kernel_size': 1,         
     'principal_axis_length': 15,    
-    'output_dir': r"C:\Users\rocia\Downloads\TFG\Cohort\Bolt_heads\P8_28_04"  
+    'output_dir': r"C:\Users\rocia\Downloads\TFG\Cohort\Bolt_heads\P7_2350"  
 }
 def main():
     os.makedirs(CONFIG['output_dir'], exist_ok=True)
     print("Loading volume data...")
-    volume_node = slicer.util.getNode('8_CTp.3D')
-    brain_mask_node = slicer.util.getNode('patient8_mask_5')
+    # start time
+    start_time = time.time() 
+    volume_node = slicer.util.getNode('7_CTp.3D')
+    brain_mask_node = slicer.util.getNode('patient7_mask_5')
     volume_array = slicer.util.arrayFromVolume(volume_node)
     brain_mask_array = slicer.util.arrayFromVolume(brain_mask_node)
     spacing = volume_node.GetSpacing()
@@ -33,17 +36,17 @@ def main():
     
     print("Performing initial segmentation...")
     binary_mask = volume_array > CONFIG['threshold_value']
-    volume_helper.create_volume(binary_mask.astype(np.uint8), "Threshold_Result", "P8_threshold.nrrd")
+    volume_helper.create_volume(binary_mask.astype(np.uint8), "Threshold_Result", "P1_threshold.nrrd")
     
     print("Removing structures inside brain mask...")
     outside_brain_mask = ~brain_mask_array.astype(bool)  
     bolt_heads_mask = binary_mask & outside_brain_mask   
-    volume_helper.create_volume(bolt_heads_mask.astype(np.uint8), "Outside_Brain_Result", "P8_outside_brain.nrrd")
+    volume_helper.create_volume(bolt_heads_mask.astype(np.uint8), "Outside_Brain_Result", "P1_outside_brain.nrrd")
     
     print("Applying morphological operations...")
     kernel = morphology.ball(CONFIG['morph_kernel_size'])
     cleaned_mask = morphology.binary_closing(bolt_heads_mask, kernel)
-    volume_helper.create_volume(cleaned_mask.astype(np.uint8), "Cleaned_Result", "P8_cleaned.nrrd")
+    volume_helper.create_volume(cleaned_mask.astype(np.uint8), "Cleaned_Result", "P1_cleaned.nrrd")
     if not np.any(cleaned_mask):
         print("No bolt head regions found at the given threshold outside the brain mask.")
         return
@@ -74,13 +77,13 @@ def main():
             })
     
     print(f"Found {len(region_info)} valid bolt head regions after filtering")
-    volume_helper.create_volume(filtered_mask, "Filtered_Bolt_Heads", "P8_filtered_bolt_heads.nrrd")
+    volume_helper.create_volume(filtered_mask, "Filtered_Bolt_Heads", "P1_filtered_bolt_heads.nrrd")
 
     # Generate PRE-VALIDATION plots
     print("Generating PRE-VALIDATION visualizations...")
     plot_size_histogram(region_sizes)
     plot_bolt_vectors(region_info, filtered_mask, spacing, origin)
-    plot_bolt_brain_context(region_info, filtered_mask, brain_mask_array, spacing, origin, name = 'P8_BRAIN_MASK_CONTEXT.png')
+    plot_bolt_brain_context(region_info, filtered_mask, brain_mask_array, spacing, origin, name = 'P1_BRAIN_MASK_CONTEXT.png')
     plot_bolt_distances_and_orientations(
             region_info, 
             brain_mask_array, 
@@ -152,6 +155,14 @@ def main():
         volume_helper
     )
 
+    end_time = time.time()
+    elapsed = end_time - start_time
+
+    # Convert to minutes and seconds
+    minutes = int(elapsed // 60)
+    seconds = int(elapsed % 60)
+
+    print(f"Duration: {minutes} minutes and {seconds} seconds")
     print("\n✅ Processing complete!")
     print(f"✅ All results saved to: {CONFIG['output_dir']}")
 
@@ -254,7 +265,7 @@ def plot_threshold_distribution(volume_array):
                 label=f'Threshold ({CONFIG["threshold_value"]})')
     plt.legend()
     plt.grid(True, alpha=0.3)
-    plt.savefig(os.path.join(CONFIG['output_dir'], "P8_intensity_distribution.png"), dpi=300)
+    plt.savefig(os.path.join(CONFIG['output_dir'], "P1_intensity_distribution.png"), dpi=300)
     plt.close()
 
 def plot_segmentation_stages(volume_array, brain_mask_array, bolt_heads_mask, cleaned_mask):
@@ -858,4 +869,4 @@ def create_entry_points_volume(validated_regions, brain_mask, spacing, origin, v
 if __name__ == "__main__":
     main()
 
-# exec(open('C:/Users/rocia/AppData/Local/slicer.org/Slicer 5.6.2/SEEG_module/SEEG_masking/bolt_head.py').read())
+# exec(open(r'C:\Users\rocia\AppData\Local\slicer.org\Slicer 5.6.2\SEEG_module\SEEG_masking\Bolt_head\bolt_head_og.py').read())

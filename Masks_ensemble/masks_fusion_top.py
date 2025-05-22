@@ -475,8 +475,8 @@ def main():
     Main execution function to select and fuse the best masks
     """
     # Paths - update these to your actual paths
-    mask_folder_path = r"C:\Users\rocia\Downloads\TFG\Cohort\Enhance_ctp_tests\P1\TH45_histograms_ml_outliers_wo_p1\descargar"
-    output_dir = r"C:\Users\rocia\Downloads\TFG\Cohort\Enhance_ctp_tests\P1_weighted_fusion"
+    mask_folder_path = r"C:\Users\rocia\Downloads\P6_ELECTRODES_MASK"
+    output_dir = r"C:\Users\rocia\Downloads\TFG\Cohort\Enhance_ctp_tests\P6_weighted_fusion_fix"
     
     # Initialize the enhanced mask selector
     selector = EnhancedMaskSelector(mask_folder_path, output_dir)
@@ -489,7 +489,7 @@ def main():
     
     # Save the individual top 10 masks
     for i, mask_name in enumerate(selected_masks, 1):
-        selector.save_mask(selector.masks[mask_name], f"P1_top_mask_{i}")
+        selector.save_mask(selector.masks[mask_name], f"P8_top_mask_{i}")
     
     # Get all mask names for reference
     all_mask_names = list(selector.masks.keys())
@@ -501,14 +501,14 @@ def main():
         all_vote_map += selector.masks[mask_name]
     threshold = len(all_mask_names) * 0.45
     fused_all = np.where(all_vote_map >= threshold, 1, 0).astype(np.uint8)
-    selector.save_mask(fused_all, "P1_all_masks_fused_traditional")
+    selector.save_mask(fused_all, "P8_all_masks_fused_traditional")
     
     # Create a single weighted fused mask from the top 10 masks
-    fused_weighted = selector.create_weighted_fused_mask(selected_masks, "P1_top10_weighted_fused")
+    fused_weighted = selector.create_weighted_fused_mask(selected_masks, "P8_top10_weighted_fused")
     
     # Create 10 progressive fused masks, incrementally adding one mask at a time
     # based on their score (from highest to lowest)
-    progressive_masks = selector.create_progressive_fused_masks(selected_masks, "P1_progressive")
+    progressive_masks = selector.create_progressive_fused_masks(selected_masks, "P8_progressive")
     
     # Create comparison plots
     selector.create_comparison_plots(all_mask_names, selected_masks, fused_all, fused_weighted)

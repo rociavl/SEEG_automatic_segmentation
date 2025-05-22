@@ -388,7 +388,7 @@ def process_roi_only(enhanced_volumes, roi_volume, final_roi, threshold_tracker,
     print("Applying ROI Only approach...")
     
     # Save ROI volume
-    enhanced_volumes['roi_volume'] = roi_volume
+    enhanced_volumes['roi_volume_features'] = roi_volume
     
     # Apply wavelet denoising
     enhanced_volumes['wavelet_only_roi'] = wavelet_denoise(enhanced_volumes['roi_volume'], wavelet='db1')
@@ -412,11 +412,11 @@ def process_roi_only(enhanced_volumes, roi_volume, final_roi, threshold_tracker,
     
     # Predict threshold for ROI volume
     if model_path:
-        threshold = predict_threshold_for_volume(enhanced_volumes['roi_volume'], model_path)
+        threshold = predict_threshold_for_volume(enhanced_volumes['roi_volume_features'], model_path)
     else:
         threshold = 980  # Fallback to fixed threshold if no model
-    enhanced_volumes['DESCARGAR_Threshold_roi_volume_980'] = np.uint8(enhanced_volumes['roi_volume'] > threshold)
-    threshold_tracker['roi_volume'] = threshold
+    enhanced_volumes['DESCARGAR_Threshold_roi_volume_980'] = np.uint8(enhanced_volumes['roi_volume_features'] > threshold)
+    threshold_tracker['roi_volume_features'] = threshold
     
     return enhanced_volumes, threshold_tracker
 
@@ -895,12 +895,12 @@ def enhance_ctp(inputVolume, inputROI=None, methods=None, outputDir=None, collec
 
 # Main execution
 start_time = time.time()
-inputVolume = slicer.util.getNode('8_CTp.3D')  
-inputROI = slicer.util.getNode('patient8_mask_5')  # Brain Mask 
+inputVolume = slicer.util.getNode('ctp.3D')  
+inputROI = slicer.util.getNode('patient1_mask_5')  # Brain Mask 
 # Output directory
-outputDir = r"C:\Users\rocia\Downloads\TFG\Cohort\Enhance_ctp_tests\P8\TH45_histograms_ml_outliers_wo_P8_faster_only_descargar"
+outputDir = r"C:\Users\rocia\Downloads\TFG\Cohort\Enhance_ctp_tests\P8\TH45_histograms_ml_outliers_wo_P1_faster_only_prueba_meeting"
 # Path to trained model
-model_path = r"C:\Users\rocia\Downloads\random_forest_model_outliers_wo_P8.joblib"
+model_path = r"C:\Users\rocia\Downloads\TFG\Cohort\Models\Threshold_model\random_forest_modelP1.joblib"
 
 # Run the enhancement function with model-based threshold prediction and descargar_only=True
 enhancedVolumeNodes = enhance_ctp(

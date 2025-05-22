@@ -356,8 +356,8 @@ class MaskSelector:
 # Main execution function
 def main():
     # Paths
-    mask_folder_path = r"C:\Users\rocia\Downloads\TFG\Cohort\Enhance_ctp_tests\P1\TH45_histograms_ml_outliers_wo_p1\descargar"
-    output_dir = r"C:\Users\rocia\Downloads\TFG\Cohort\Enhance_ctp_tests\P1_fused_greedy_ml_threshold"
+    mask_folder_path = r"C:\Users\rocia\Downloads\P1_ELECTRODES_MASK"
+    output_dir = r"C:\Users\rocia\Downloads\TFG\Cohort\Enhance_ctp_tests\P1_weighted_fusion_fix"
     
     # Initialize the mask selector
     selector = MaskSelector(mask_folder_path, output_dir)

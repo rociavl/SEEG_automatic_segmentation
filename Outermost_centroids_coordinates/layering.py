@@ -11,6 +11,7 @@ from skimage.measure import marching_cubes
 import logging
 import os
 import seaborn as sns
+from scipy.ndimage import distance_transform_edt
 from Bolt_head.bolt_head_concensus import VolumeHelper
 
 logging.basicConfig(level=logging.INFO)
@@ -23,7 +24,6 @@ def get_array_from_volume(volume_node):
 
 def binarize_array(array, threshold=0):
     return (array > threshold).astype(np.uint8) if array is not None else None
-
 
 def calculate_centroids_numpy(electrodes_array):
     if electrodes_array is None:
@@ -74,7 +74,6 @@ def convert_surface_vertices_to_ras(volume_node, surface_vertices):
         ras = get_ras_coordinates_from_ijk(volume_node, ijk)
         surface_points_ras.append(ras)
     return np.array(surface_points_ras)
-
 
 def create_centroids_volume(volume_mask, centroids_ras, output_dir, volume_name="outermost_centroids"):
     """
@@ -128,30 +127,6 @@ def create_centroids_volume(volume_mask, centroids_ras, output_dir, volume_name=
         save_filename=output_filename
     )
     return centroids_volume
-
-# Modify your main function to include this:
-def main(output_dir="output_plots"):
-    volume_mask = slicer.util.getNode("patient1_mask_5")
-    volume_electrodes = slicer.util.getNode('electrode_mask_success')
-    
-    filtered_centroids, surface, distances = filter_centroids_by_surface_distance(
-        volume_mask, volume_electrodes, output_dir, max_distance=2.0
-    )
-    
-    # Create markups (original functionality)
-    markups = create_markups_from_centroids(filtered_centroids)
-    
-    # NEW: Create and save centroids volume
-    centroids_volume = create_centroids_volume(
-        volume_mask, 
-        filtered_centroids, 
-        output_dir
-    )
-    
-    print(f"Created {len(filtered_centroids)} centroids markups and volume")
-    print(f"Output saved to: {os.path.abspath(output_dir)}")
-
-
 
 def plot_3d_surface_and_centroids(surface_vertices_ras, surface_faces, centroids_ras, distances, output_dir, max_distance=2.0):
     fig = plt.figure(figsize=(18, 10))
@@ -300,19 +275,127 @@ def create_markups_from_centroids(centroids):
     
     return markups
 
+def create_anatomical_layers(volume_mask_node, layer_thickness_mm=2.0, num_layers=4):
+    """
+    Creates nested anatomical layers from brain surface inward.
+    Returns list of vtkMRMLScalarVolumeNodes representing each layer.
+    """
+    # Get binary mask array and spacing
+    brain_array = slicer.util.arrayFromVolume(volume_mask_node)
+    binary_mask = (brain_array > 0).astype(np.uint8)
+    spacing = volume_mask_node.GetSpacing()
+    
+    # Compute distance from surface (in mm)
+    distance_map = distance_transform_edt(binary_mask, sampling=spacing)
+    
+    # Create layered volumes
+    layer_nodes = []
+    for i in range(num_layers):
+        min_dist = i * layer_thickness_mm
+        max_dist = (i+1) * layer_thickness_mm
+        
+        layer_mask = ((distance_map >= min_dist) & (distance_map < max_dist)).astype(np.uint8)
+        
+        layer_node = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLScalarVolumeNode")
+        layer_node.SetName(f"Brain_Layer_{i+1}_{min_dist:.1f}-{max_dist:.1f}mm")
+        slicer.util.updateVolumeFromArray(layer_node, layer_mask)
+        layer_node.Copy(volume_mask_node)  # Copy geometry
+        layer_nodes.append(layer_node)
+    
+    return layer_nodes
+
+def assign_contacts_to_layers(electrode_node, layer_nodes):
+    """
+    Assigns each contact to its corresponding anatomical layer.
+    Returns dictionary: {contact_name: layer_name}
+    """
+    contacts_layer = {}
+    
+    # Get all contact positions
+    markups = electrode_node.GetMarkups()
+    for i in range(markups.GetNumberOfControlPoints()):
+        contact_ras = [0,0,0]
+        markups.GetNthControlPointPositionWorld(i, contact_ras)
+        contact_name = markups.GetNthControlPointLabel(i)
+        
+        # Convert RAS to IJK for each layer
+        for layer in layer_nodes:
+            ijk = [0,0,0]
+            layer.GetRASToIJKMatrix().MultiplyPoint(contact_ras + [1], ijk)
+            ijk = [int(round(x)) for x in ijk[:3]]
+            
+            # Check if in layer volume bounds
+            dims = layer.GetImageData().GetDimensions()
+            if all(0 <= ijk[d] < dims[d] for d in range(3)):
+                layer_array = slicer.util.arrayFromVolume(layer)
+                if layer_array[ijk[2], ijk[1], ijk[0]]:  # z,y,x order
+                    contacts_layer[contact_name] = layer.GetName()
+                    break
+    
+    return contacts_layer
+
 def main(output_dir="output_plots"):
-     volume_mask = slicer.util.getNode("patient1_mask_5")
-     volume_electrodes = slicer.util.getNode('electrode_mask_success')
+    # Ensure output directory exists
+    os.makedirs(output_dir, exist_ok=True)
     
-     filtered_centroids, surface, distances = filter_centroids_by_surface_distance(
+    # Get input volumes
+    volume_mask = slicer.util.getNode("patient1_mask_5")
+    volume_electrodes = slicer.util.getNode('electrode_mask_success')
+    
+    # 1. Filter centroids by surface distance
+    filtered_centroids, surface, distances = filter_centroids_by_surface_distance(
         volume_mask, volume_electrodes, output_dir, max_distance=2.0
-     )
+    )
     
-     markups = create_markups_from_centroids(filtered_centroids)
-     print(f"Created {len(filtered_centroids)} centroids markups")
-     print(f"Plots saved to: {os.path.abspath(output_dir)}")
+    # 2. Create markups for filtered centroids
+    markups = create_markups_from_centroids(filtered_centroids)
+    
+    # 3. Create centroids volume
+    centroids_volume = create_centroids_volume(
+        volume_mask, 
+        filtered_centroids, 
+        output_dir
+    )
+    
+    # 4. Create anatomical layers and assign contacts
+    anatomical_layers = create_anatomical_layers(
+        volume_mask_node=volume_mask,
+        layer_thickness_mm=1.0,
+        num_layers=4
+    )
+    
+    # Assign electrodes to layers (assuming electrode_list contains markup fiducial nodes)
+    electrode_list = [markups]  # Using our filtered centroids markups
+    contact_assignments = {}
+    for electrode_node in electrode_list:
+        contact_assignments.update(assign_contacts_to_layers(electrode_node, anatomical_layers))
+    
+    # Save contact assignments to file
+    with open(os.path.join(output_dir, 'contact_assignments.txt'), 'w') as f:
+        f.write("Contact Layer Assignments:\n")
+        for contact, layer in contact_assignments.items():
+            f.write(f"{contact}: {layer}\n")
+    
+    # Visualize layers with rainbow colormap and 50% opacity
+    for layer in anatomical_layers:
+        # Create display node if doesn't exist
+        if not layer.GetDisplayNode():
+            layer.CreateDefaultDisplayNodes()
+        
+        display_node = layer.GetDisplayNode()
+        display_node.SetAndObserveColorNodeID("vtkMRMLColorTableNodeRainbow")
+        display_node.SetOpacity(0.5)
+        
+        # Auto-contrast for visibility
+        display_node.AutoWindowLevelOn()
+    
+    print(f"Created {len(filtered_centroids)} centroids markups and volume")
+    print(f"Created {len(anatomical_layers)} anatomical layers")
+    print(f"Output saved to: {os.path.abspath(output_dir)}")
 
 if __name__ == "__main__":
-     main(output_dir= r"C:\Users\rocia\Downloads\TFG\Cohort\Centroids\P1\P1_colab_distance\output_plots")
+    main(output_dir=r"C:\Users\rocia\Downloads\TFG\Cohort\Centroids\P1\P1_colab_layering\output_plots")
 
-#exec(open(r"C:\Users\rocia\AppData\Local\slicer.org\Slicer 5.6.2\SEEG_module\SEEG_masking\Outermost_centroids_coordinates\outermost_centroids_vol_slicer.py").read())
+#exec(open(r"C:\Users\rocia\AppData\Local\slicer.org\Slicer 5.6.2\SEEG_module\SEEG_masking\Outermost_centroids_coordinates\layering.py").read())
+
+

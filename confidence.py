@@ -40,7 +40,7 @@ class ConfidenceThresholdViewer(QWidget):
                     x = float(row['RAS_X'])
                     y = float(row['RAS_Y'])
                     z = float(row['RAS_Z'])
-                    confidence = float(row['predicted_confidence'])
+                    confidence = float(row['Ensemble_Confidence'])
                     self.points.append((x, y, z, confidence))
                 except Exception as e:
                     print(f"Skipping row due to error: {e}")
@@ -61,7 +61,7 @@ class ConfidenceThresholdViewer(QWidget):
                 self.markupNode.AddFiducial(x, y, z)
 
 # === Path to your CSV ===
-csv_path = r"C:\Users\rocia\Downloads\TFG\P1_mask5_predictions.csv"
+csv_path = r"C:\Users\rocia\Downloads\patient_LOO_Ensemble_P2_top_predictions.csv"
 
 # === Run the interactive viewer ===
 confidenceViewer = ConfidenceThresholdViewer(csv_path)

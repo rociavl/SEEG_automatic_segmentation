@@ -11,11 +11,12 @@ import scipy.spatial.distance as distance
 from scipy.ndimage import binary_dilation, binary_erosion
 import csv  # Added CSV module import
 import time
+import pandas as pd
+
 
 def get_ras_coordinates_from_ijk(volume_node, ijk):
     ijk_to_ras = vtk.vtkMatrix4x4()
     volume_node.GetIJKToRASMatrix(ijk_to_ras)
-    
     homogeneous_ijk = [ijk[0], ijk[1], ijk[2], 1]
     ras = [
         sum(ijk_to_ras.GetElement(i, j) * homogeneous_ijk[j] for j in range(4))
@@ -25,21 +26,22 @@ def get_ras_coordinates_from_ijk(volume_node, ijk):
 
 
 CONFIG = {
-    'threshold_value': 2416, #P1: 2240, P4:2340, P5: 2746, P7: 2806, P8> 2416
+    'threshold_value': 2325, #P1: 2240, P4:2340, P5: 2746, P7: 2806, P8> 2416
     'min_region_size': 100,         
     'max_region_size': 800,         
     'morph_kernel_size': 1,         
     'principal_axis_length': 15,    
-    'output_dir': r"C:\Users\rocia\Downloads\TFG\Cohort\Bolt_heads\P8_08_05"  
+    'output_dir': r"C:\Users\rocia\Downloads\TFG\Cohort\Bolt_heads\P6_2325"  # tu directorio 
 }
+
 def main():
     os.makedirs(CONFIG['output_dir'], exist_ok=True)
     print("Loading volume data...")
     # start time
     start_time = time.time()
     # Load the volume and brain mask nodes
-    volume_node = slicer.util.getNode('8_CTp.3D')
-    brain_mask_node = slicer.util.getNode('patient8_mask_5')
+    volume_node = slicer.util.getNode('6_CTp.3D') # CT del paciente 
+    brain_mask_node = slicer.util.getNode('patient6_mask_5') # ROI del cerebro del paciente
     volume_array = slicer.util.arrayFromVolume(volume_node)
     brain_mask_array = slicer.util.arrayFromVolume(brain_mask_node)
     spacing = volume_node.GetSpacing()
@@ -50,17 +52,17 @@ def main():
     
     print("Performing initial segmentation...")
     binary_mask = volume_array > CONFIG['threshold_value']
-    volume_helper.create_volume(binary_mask.astype(np.uint8), "Threshold_Result", "P8_threshold.nrrd")
+    volume_helper.create_volume(binary_mask.astype(np.uint8), "Threshold_Result", "P6_threshold.nrrd")
     
     print("Removing structures inside brain mask...")
     outside_brain_mask = ~brain_mask_array.astype(bool)  
     bolt_heads_mask = binary_mask & outside_brain_mask   
-    volume_helper.create_volume(bolt_heads_mask.astype(np.uint8), "Outside_Brain_Result", "P8_outside_brain.nrrd")
+    volume_helper.create_volume(bolt_heads_mask.astype(np.uint8), "Outside_Brain_Result", "P6_outside_brain.nrrd")
     
     print("Applying morphological operations...")
     kernel = morphology.ball(CONFIG['morph_kernel_size'])
     cleaned_mask = morphology.binary_closing(bolt_heads_mask, kernel)
-    volume_helper.create_volume(cleaned_mask.astype(np.uint8), "Cleaned_Result", "P8_cleaned.nrrd")
+    volume_helper.create_volume(cleaned_mask.astype(np.uint8), "Cleaned_Result", "P6_cleaned.nrrd")
     if not np.any(cleaned_mask):
         print("No bolt head regions found at the given threshold outside the brain mask.")
         return
@@ -91,7 +93,7 @@ def main():
             })
     
     print(f"Found {len(region_info)} valid bolt head regions after filtering")
-    volume_helper.create_volume(filtered_mask, "Filtered_Bolt_Heads", "P8_filtered_bolt_heads.nrrd")
+    volume_helper.create_volume(filtered_mask, "Filtered_Bolt_Heads", "P6_filtered_bolt_heads.nrrd")
 
     validated_regions, invalidated_regions = validate_bolt_head_in_brain_context(
         region_info, brain_mask_array, spacing, origin
@@ -119,33 +121,20 @@ def main():
     # Plotting entry points for validated regions
     plot_entry_points(validated_regions, filtered_mask, brain_mask_array, spacing, origin)
 
-    try:
-        plot_bolt_distances_and_orientations(
-            validated_regions, 
-            brain_mask_array, 
-            spacing, 
-            origin, 
-            CONFIG['output_dir']
-        )
-        print("✅ Advanced bolt head analysis completed successfully")
-    except Exception as e:
-        print(f"Error in advanced bolt analysis: {e}")
-        import traceback
-        traceback.print_exc()
-
-    create_entry_points_volume(
+    entry_points_mask, ras_coordinates = create_entry_points_volume(
         validated_regions, 
         brain_mask_array, 
         spacing, 
         origin, 
         volume_helper
     )
-
     # finish time
     end_time = time.time()
-    minutes = (end_time - start_time) / 60
-    seconds = (end_time - start_time) % 60
-    print(f"✅ Processing completed in {int(minutes)} minutes and {int(seconds)} seconds")
+    elapsed_time = end_time - start_time
+    minutes = int((elapsed_time % 3600) // 60)
+    seconds = elapsed_time % 60
+    print(f"Mask ensembling completed in {minutes}m {seconds:.2f}s")
+    
     print("\n✅ Processing complete!")
     print(f"✅ All results saved to: {CONFIG['output_dir']}")
 
@@ -261,7 +250,7 @@ def plot_entry_points(region_info, filtered_mask, brain_mask, spacing, origin):
     ax.set_zlabel('Z (mm)')
     ax.set_title('Bolt Heads with Brain Entry Points')
     ax.view_init(elev=30, azim=45)
-    plt.savefig(os.path.join(CONFIG['output_dir'], "P8_bolt_heads_entry_points.png"), dpi=300)
+    plt.savefig(os.path.join(CONFIG['output_dir'], "P6_bolt_heads_entry_points.png"), dpi=300)
     plt.close()
 
 def calculate_principal_axis(coords, spacing):
@@ -298,69 +287,7 @@ def compute_surface_mask(mask, connectivity=1):
     eroded = binary_erosion(mask, iterations=1)
     return dilated ^ eroded  # XOR to get surface
 
-def compute_axis_angles(axes):
-    angles = []
-    for i in range(len(axes)):
-        for j in range(i+1, len(axes)):
-            axis1 = axes[i] / np.linalg.norm(axes[i])
-            axis2 = axes[j] / np.linalg.norm(axes[j])
-            angle = np.arccos(np.clip(np.dot(axis1, axis2), -1.0, 1.0))
-            angles.append(np.degrees(angle))
-    return angles
-
-
-def plot_bolt_distances_and_orientations(region_info, brain_mask, spacing, origin, output_dir, name = "P1_bolt_spatial_analysis.png"):
-    surface_distances = []
-    centroids = []
-    for info in region_info:
-        centroid = info['physical_centroid']
-        dist = compute_distance_to_surface(centroid, brain_mask, spacing, origin)
-        surface_distances.append(dist)
-        centroids.append(centroid)
-    # Convert to numpy arrays
-    centroids = np.array(centroids)
-    surface_distances = np.array(surface_distances)
-    fig, axs = plt.subplots(2, 2, figsize=(16, 14))
-    fig.suptitle('Bolt Head Spatial Analysis', fontsize=16)
-    # Surface Distance Histogram
-    axs[0, 0].hist(surface_distances, bins=20, color='skyblue', edgecolor='black')
-    axs[0, 0].set_title('Distribution of Distances to Brain Surface')
-    axs[0, 0].set_xlabel('Distance (mm)')
-    axs[0, 0].set_ylabel('Frequency') 
-    # 3D Scatter of Centroids colored by surface distance
-    ax_3d = fig.add_subplot(2, 2, 2, projection='3d')
-    scatter = ax_3d.scatter(
-        centroids[:, 0], 
-        centroids[:, 1], 
-        centroids[:, 2], 
-        c=surface_distances, 
-        cmap='viridis'
-    )
-    ax_3d.set_title('Bolt Head Centroids')
-    ax_3d.set_xlabel('X (mm)')
-    ax_3d.set_ylabel('Y (mm)')
-    ax_3d.set_zlabel('Z (mm)')
-    plt.colorbar(scatter, ax=ax_3d, label='Distance to Surface (mm)')
-    
-    # Pairwise Distances Heatmap
-    pairwise_distances = distance.squareform(distance.pdist(centroids))
-    im = axs[1, 0].imshow(pairwise_distances, cmap='YlOrRd')
-    axs[1, 0].set_title('Pairwise Bolt Head Distances')
-    axs[1, 0].set_xlabel('Bolt Head Index')
-    axs[1, 0].set_ylabel('Bolt Head Index')
-    plt.colorbar(im, ax=axs[1, 0], label='Distance (mm)')
-    
-    # Principal Axis Orientation Analysis
-    principal_axes = np.array([info['principal_axis'] for info in region_info])
-    axis_angles = compute_axis_angles(principal_axes)
-    axs[1, 1].hist(axis_angles, bins=20, color='lightgreen', edgecolor='black')
-    axs[1, 1].set_title('Distribution of Principal Axis Angles')
-    axs[1, 1].set_xlabel('Angle Between Axes (degrees)')
-    axs[1, 1].set_ylabel('Frequency') 
-    plt.tight_layout()
-    plt.savefig(os.path.join(output_dir, name), dpi=300)
-    plt.close()
-
+ 
 
 def plot_surface(ax, mask, spacing, origin, color='blue', alpha=0.7):
     try:
@@ -373,7 +300,7 @@ def plot_surface(ax, mask, spacing, origin, color='blue', alpha=0.7):
 
 
 # Plot bolts with brain context
-def plot_bolt_brain_context(region_info, filtered_mask, brain_mask, spacing, origin, name = "P8_bolt_heads_brain_context.png"):
+def plot_bolt_brain_context(region_info, filtered_mask, brain_mask, spacing, origin, name = "P6_bolt_heads_brain_context.png"):
     fig = plt.figure(figsize=(12, 10))
     ax = fig.add_subplot(111, projection='3d')
     plot_surface(ax, brain_mask, spacing, origin, 'lightblue', 0.3)
@@ -411,7 +338,6 @@ def validate_bolt_head_in_brain_context(region_info, brain_mask, spacing, origin
 def plot_brain_context_with_validation(validated_regions, invalidated_regions, filtered_mask, brain_mask, spacing, origin):
     fig = plt.figure(figsize=(15, 12))
     ax = fig.add_subplot(111, projection='3d')
-    
     # Plot brain mask with transparency
     plot_surface(ax, brain_mask, spacing, origin, 'lightblue', 0.3)
     # Plot validated bolt regions in green
@@ -421,7 +347,6 @@ def plot_brain_context_with_validation(validated_regions, invalidated_regions, f
         vector = np.array(info['principal_axis'])
         ax.quiver(*centroid, *vector, color='blue', linewidth=2, arrow_length_ratio=0.2)
         ax.text(*centroid, f"{info['surface_distance']:.1f} mm", color='blue')
-    
     # Plot invalidated bolt regions in red
     for info in invalidated_regions:
         plot_surface(ax, filtered_mask == info['label'], spacing, origin, 'red', 0.5)
@@ -431,139 +356,160 @@ def plot_brain_context_with_validation(validated_regions, invalidated_regions, f
         ax.quiver(*centroid, *vector, color='orange', linewidth=1, arrow_length_ratio=0.2)
         # Annotate surface distance
         ax.text(*centroid, f"{info['surface_distance']:.1f} mm", color='red')
-
     ax.set_xlabel('X (mm)')
     ax.set_ylabel('Y (mm)')
     ax.set_zlabel('Z (mm)')
     ax.set_title('Bolt Heads Validation: Brain Surface Distance')
     ax.view_init(elev=30, azim=45)
-    
-    plt.savefig(os.path.join(CONFIG['output_dir'], "P8_bolt_heads_brain_validation.png"), dpi=300)
+    plt.savefig(os.path.join(CONFIG['output_dir'], "P6_bolt_heads_brain_validation.png"), dpi=300)
     plt.close()
 
-    # Update to create a CSV report instead of a text report
-    csv_path = os.path.join(CONFIG['output_dir'], "P8_bolt_heads_validation_report.csv")
-    with open(csv_path, 'w', newline='') as csvfile:
-        # Define CSV writer
-        fieldnames = ['type', 'bolt_id', 'position_x', 'position_y', 'position_z', 'surface_distance', 
-                      'volume', 'direction_x', 'direction_y', 'direction_z']
-        writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
-        
-        # Write header
-        writer.writeheader()
-        
-        # Write data for validated bolt heads
-        for i, info in enumerate(validated_regions, 1):
-            writer.writerow({
-                'type': 'validated',
-                'bolt_id': i,
-                'position_x': round(info['physical_centroid'][0], 1),
-                'position_y': round(info['physical_centroid'][1], 1),
-                'position_z': round(info['physical_centroid'][2], 1),
-                'surface_distance': round(info['surface_distance'], 1),
-                'volume': info['volume'],
-                'direction_x': round(info['principal_axis'][0], 2),
-                'direction_y': round(info['principal_axis'][1], 2),
-                'direction_z': round(info['principal_axis'][2], 2)
-            })
-        
-        # Write data for invalidated bolt heads
-        for i, info in enumerate(invalidated_regions, 1):
-            writer.writerow({
-                'type': 'invalidated',
-                'bolt_id': i,
-                'position_x': round(info['physical_centroid'][0], 1),
-                'position_y': round(info['physical_centroid'][1], 1),
-                'position_z': round(info['physical_centroid'][2], 1),
-                'surface_distance': round(info['surface_distance'], 1),
-                'volume': info['volume'],
-                'direction_x': round(info['principal_axis'][0], 2),
-                'direction_y': round(info['principal_axis'][1], 2),
-                'direction_z': round(info['principal_axis'][2], 2)
-            })
-    
-    print(f"✅ Saved bolt heads validation report to {csv_path}")
+    print(f"✅ Saved bolt heads validation plot to P6_bolt_heads_brain_validation.png ")
 
 def create_entry_points_volume(validated_regions, brain_mask, spacing, origin, volume_helper):
-    """
-    Creates both a volume mask and markup fiducials for brain entry points
-    using RAS coordinates calculated from IJK coordinates
-    
-    Args:
-        validated_regions: List of validated bolt regions with entry point information
-        brain_mask: 3D numpy array of the brain mask
-        spacing: Voxel spacing of the volume
-        origin: Origin coordinates of the volume
-        volume_helper: VolumeHelper instance for creating volumes
-        
-    Returns:
-        entry_points_mask: 3D numpy array marking entry points
-    """
-    # Create volume mask for entry points
+    # Create a mask to mark entry points
     entry_points_mask = np.zeros_like(brain_mask, dtype=np.uint8)
     
-    # Create a new markup fiducial node for the entry points
+    # Create markups node for visualization
     markups_node = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLMarkupsFiducialNode", "BoltEntryPoints")
     markups_node.CreateDefaultDisplayNodes()
-    markups_node.GetDisplayNode().SetSelectedColor(0, 1, 0)  # Green color for points
-    markups_node.GetDisplayNode().SetPointSize(5)  # Make points visible
+    markups_node.GetDisplayNode().SetSelectedColor(0, 1, 0)
+    markups_node.GetDisplayNode().SetPointSize(5)
     
-    # Process each validated region and mark entry points in the mask
+    # Track which validated region corresponds to which mask value
+    region_index_to_mask_value = {}
+    
+    # First pass: Create the mask with entry points
     for i, info in enumerate(validated_regions):
         if 'brain_entry_point' in info and info['brain_entry_point'] is not None:
-            # Convert physical coordinates to voxel coordinates (IJK)
+            # Convert physical coordinates to voxel coordinates
             entry_point_voxel = np.round(
                 (np.array(info['brain_entry_point']) - np.array(origin)) / np.array(spacing)
             ).astype(int)
             
             try:
                 x, y, z = entry_point_voxel
-                # Small 3x3x3 neighborhood marking in the volume mask
+                # Use a unique value for each region (i+1)
+                mask_value = i + 1
+                
+                # Record which mask value corresponds to which validated region
+                region_index_to_mask_value[i] = mask_value
+                
+                # Mark in the mask with unique label
                 entry_points_mask[
                     max(0, x-1):min(entry_points_mask.shape[0], x+2),
                     max(0, y-1):min(entry_points_mask.shape[1], y+2),
                     max(0, z-1):min(entry_points_mask.shape[2], z+2)
-                ] = i + 1  # Use region index as label
+                ] = mask_value
             except IndexError:
                 print(f"Warning: Entry point {entry_point_voxel} out of brain mask bounds")
     
-    # Create the entry points volume AFTER modifying the mask
+    # Create the volume for visualization
     entry_mask_node = volume_helper.create_volume(
         entry_points_mask, 
         "EntryPointsMask",
-        "P8_brain_entry_points.nrrd"
+        "P7_brain_entry_points.nrrd"
     )
     
-    # Use regionprops to get the centroids of each labeled region
-    from skimage.measure import label, regionprops
-    labeled_image = label(entry_points_mask > 0)
+    # Use regionprops to get centroids in IJK space
+    labeled_image = label(entry_points_mask)
     regions = regionprops(labeled_image)
     
-    for i, region in enumerate(regions):
-        # Get centroid in IJK coordinates (needs to be in [i,j,k] order for the conversion function)
+    # Create a mapping from regionprops label to RAS coordinates
+    label_to_ras = {}
+    ras_coordinates_list = []
+    
+    # Process regionprops to get RAS coordinates
+    for region in regions:
+        # Get centroid in IJK coordinates
         centroid_ijk = region.centroid
-        
-        # Correct IJK order - regionprops returns [z,y,x] but we need [i,j,k]
-        # According to your get_ras_coordinates_from_ijk function, the order should be [k,j,i]
+        # Correct IJK order for the conversion function
         ijk_for_conversion = [centroid_ijk[2], centroid_ijk[1], centroid_ijk[0]]
         
-        # Convert IJK to RAS using get_ras_coordinates_from_ijk
+        # Convert IJK to RAS
         ras_coords = get_ras_coordinates_from_ijk(entry_mask_node, ijk_for_conversion)
         
-        # Add entry point as markup fiducial
-        # The AddControlPoint method expects RAS coordinates directly
+        # Add to markups node
         markups_node.AddControlPoint(
             ras_coords[0], ras_coords[1], ras_coords[2],
-            f"Entry_{i+1}"
+            f"Entry_{region.label}"
         )
+        
+        # Store RAS coordinates
+        label_to_ras[region.label] = ras_coords
+        ras_coordinates_list.append(ras_coords)
     
     # Save the markup nodes
-    save_path = os.path.join(CONFIG['output_dir'], "P8_entry_points_markups.fcsv")
+    save_path = os.path.join(CONFIG['output_dir'], "P6_entry_points_markups.fcsv")
     slicer.util.saveNode(markups_node, save_path)
     print(f"✅ Saved entry points markup file to {save_path}")
     
-    return entry_points_mask
+    # Create mapping from mask values to regionprops labels
+    # This is needed because regionprops may relabel regions
+    mask_value_to_region_label = {}
+    for region in regions:
+        region_label = region.label
+        region_mask = labeled_image == region_label
+        unique_values = np.unique(entry_points_mask[region_mask])
+        if len(unique_values) > 0 and unique_values[0] > 0:
+            mask_value_to_region_label[unique_values[0]] = region_label
+    
+    # Create the report data using all the mappings
+    report_data = []
+    for i, info in enumerate(validated_regions):
+        if 'brain_entry_point' in info and info['brain_entry_point'] is not None:
+            # Get the mask value for this validated region
+            mask_value = region_index_to_mask_value.get(i)
+            if mask_value is None:
+                continue
+                
+            # Get the regionprops label for this mask value
+            region_label = mask_value_to_region_label.get(mask_value)
+            if region_label is None:
+                continue
+                
+            # Get the RAS coordinates for this region label
+            ras_coords = label_to_ras.get(region_label)
+            if ras_coords is None:
+                continue
+                
+            # Create row for this entry point
+            row = {
+                # RAS coordinates
+                'ras_x': round(ras_coords[0], 1),
+                'ras_y': round(ras_coords[1], 1), 
+                'ras_z': round(ras_coords[2], 1),
+                
+                # Original brain entry point coordinates
+                'entry_point_x': round(info['brain_entry_point'][0], 1),
+                'entry_point_y': round(info['brain_entry_point'][1], 1),
+                'entry_point_z': round(info['brain_entry_point'][2], 1),
+                
+                # Additional metrics
+                'surface_distance': round(info.get('surface_distance', 0), 1),
+                'volume': info['volume'],
+                'direction_x': round(info['principal_axis'][0], 2),
+                'direction_y': round(info['principal_axis'][1], 2),
+                'direction_z': round(info['principal_axis'][2], 2),
+                'entry_distance': round(info.get('entry_distance', 0), 1),
+            }
+            report_data.append(row)
+    
+    # Create and save CSV report
+    df = pd.DataFrame(report_data)
+    csv_path = os.path.join(CONFIG['output_dir'], "P6_brain_entry_points_report.csv")
+    df.to_csv(csv_path, index=False)
+    print(f"✅ Saved brain entry points report to {csv_path}")
+    
+    # Debug output
+    print(f"Number of validated regions with entry points: {sum(1 for info in validated_regions if 'brain_entry_point' in info and info['brain_entry_point'] is not None)}")
+    print(f"Number of regions found by regionprops: {len(regions)}")
+    print(f"Number of report entries generated: {len(report_data)}")
+    
+    return entry_points_mask, ras_coordinates_list
+
 if __name__ == "__main__":
     main()
+
 
 # exec(open(r'C:\Users\rocia\AppData\Local\slicer.org\Slicer 5.6.2\SEEG_module\SEEG_masking\Bolt_head\bolt_head.py').read())

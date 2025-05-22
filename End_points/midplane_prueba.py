@@ -278,38 +278,38 @@ def run_full_analysis(volume_mask, volume_electrodes, output_dir, max_distance=2
     
     return midplane_contacts
 
-def main():
-    try:
-        # Initialize with validation
-        mask_volume = slicer.util.getNode("patient1_mask_5")
-        electrodes_volume = slicer.util.getNode('validated_electrode_mask')
-        output_dir = r"C:\Users\rocia\Downloads\TFG\Cohort\Centroids\End_points\output_plots"
-        logging.info("Starting analysis with verification:")
+# def main():
+#     try:
+#         # Initialize with validation
+#         mask_volume = slicer.util.getNode("patient1_mask_5")
+#         electrodes_volume = slicer.util.getNode('validated_electrode_mask')
+#         output_dir = r"C:\Users\rocia\Downloads\TFG\Cohort\Centroids\End_points\output_plots"
+#         logging.info("Starting analysis with verification:")
         
-        # Step 1: Verify plane position
-        mid_x, plane_point, normal = compute_midsagittal_plane(mask_volume)
-        logging.info(f"Plane position: X={mid_x:.2f}, Y={plane_point[1]:.2f}, Z={plane_point[2]:.2f}")
+#         # Step 1: Verify plane position
+#         mid_x, plane_point, normal = compute_midsagittal_plane(mask_volume)
+#         logging.info(f"Plane position: X={mid_x:.2f}, Y={plane_point[1]:.2f}, Z={plane_point[2]:.2f}")
         
-        # Step 2: Verify electrode coordinates
-        electrodes = get_all_centroids(electrodes_volume)
-        sample_label = next(iter(electrodes)) if electrodes else None
-        if sample_label:
-            logging.info(f"Sample electrode {sample_label} at {electrodes[sample_label]}")
+#         # Step 2: Verify electrode coordinates
+#         electrodes = get_all_centroids(electrodes_volume)
+#         sample_label = next(iter(electrodes)) if electrodes else None
+#         if sample_label:
+#             logging.info(f"Sample electrode {sample_label} at {electrodes[sample_label]}")
 
-        midplane_contacts = run_full_analysis(
-            mask_volume,
-            electrodes_volume,
-            output_dir,
-            max_distance=5.0 
-        )
+#         midplane_contacts = run_full_analysis(
+#             mask_volume,
+#             electrodes_volume,
+#             output_dir,
+#             max_distance=5.0 
+#         )
 
-        if midplane_contacts:
-            create_midplane_markups(midplane_contacts)
-            logging.info(f"Created {len(midplane_contacts)} markups")
+#         if midplane_contacts:
+#             create_midplane_markups(midplane_contacts)
+#             logging.info(f"Created {len(midplane_contacts)} markups")
         
-        logging.info("Process completed successfully")
+#         logging.info("Process completed successfully")
         
-    except Exception as e:
-        logging.error(f"Main execution failed: {str(e)}")
-main()
+#     except Exception as e:
+#         logging.error(f"Main execution failed: {str(e)}")
+# main()
 #exec(open('C:/Users/rocia/AppData/Local/slicer.org/Slicer 5.6.2/SEEG_module/SEEG_masking/End_points/midplane.py').read())
