@@ -391,7 +391,7 @@ def process_roi_only(enhanced_volumes, roi_volume, final_roi, threshold_tracker,
     enhanced_volumes['roi_volume_features'] = roi_volume
     
     # Apply wavelet denoising
-    enhanced_volumes['wavelet_only_roi'] = wavelet_denoise(enhanced_volumes['roi_volume'], wavelet='db1')
+    enhanced_volumes['wavelet_only_roi'] = wavelet_denoise(enhanced_volumes['roi_volume_features'], wavelet='db1')
     # Predict threshold for wavelet denoised volume
     if model_path:
         threshold = predict_threshold_for_volume(enhanced_volumes['wavelet_only_roi'], model_path)
@@ -646,7 +646,7 @@ def process_first_try(enhanced_volumes, roi_volume, threshold_tracker, model_pat
         threshold = predict_threshold_for_volume(enhanced_volumes['FT_RESTA_TOPHAT_GAUSSIAN'], model_path)
     else:
         threshold = 419  # Fallback to fixed threshold if no model
-    enhanced_volumes['DESCARGAR_FT_RESTA_TOPHAT_GAUSSIAN_419'] = np.uint(enhanced_volumes['FT_RESTA_TOPHAT_GAUSSIAN'] > threshold)
+    enhanced_volumes['DESCARGAR_FT_RESTA_TOPHAT_GAUSSIAN_419'] = np.uint8(enhanced_volumes['FT_RESTA_TOPHAT_GAUSSIAN'] > threshold)
     threshold_tracker['FT_RESTA_TOPHAT_GAUSSIAN'] = threshold
     
     # Apply gamma correction

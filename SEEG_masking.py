@@ -25,23 +25,17 @@ if threshold_mask_dir not in sys.path:
 # Import CTPEnhancer from enhance_ctp
 from Threshold_mask.ctp_enhancer import CTPEnhancer
 
-
 # Define path to the model
 MODEL_PATH = os.path.join(module_dir, "models", "random_forest_modelP1.joblib")
-
 
 import slicer
 from slicer.i18n import tr as _
 from slicer.i18n import translate
 from slicer.ScriptedLoadableModule import *
 from slicer.util import VTKObservationMixin
-from slicer.parameterNodeWrapper import (
-    parameterNodeWrapper,
-    WithinRange)
 
 from slicer import vtkMRMLScalarVolumeNode
 import qt
-
 
 #
 # SEEG_masking
@@ -55,17 +49,13 @@ class SEEG_masking(ScriptedLoadableModule):
     def __init__(self, parent):
         ScriptedLoadableModule.__init__(self, parent)
         self.parent.title = _("SEEG Masking")
-        # TODO: set categories (folders where the module shows up in the module selector)
         self.parent.categories = [translate("qSlicerAbstractCoreModule", "Examples")]
-        self.parent.dependencies = []  # TODO: add here list of module names that this module requires
-        self.parent.contributors = ["Rocio Avalos (AnyWare Corp.)"]  # TODO: replace with "Firstname Lastname (Organization)"
-        # TODO: update with short description of the module and a link to online module documentation
-        # _() function marks text as translatable to other languages
+        self.parent.dependencies = []
+        self.parent.contributors = ["Rocio Avalos (AnyWare Corp.)"]
         self.parent.helpText = _("""
 This is an example of scripted loadable module bundled in an extension.
 See more information in <a href="https://github.com/organization/projectname#SEEG_masking">module documentation</a>.
 """)
-        # TODO: replace with organization, grant and thanks
         self.parent.acknowledgementText = _("""
 This file was originally developed by Jean-Christophe Fillion-Robin, Kitware Inc., Andras Lasso, PerkLab,
 and Steve Pieper, Isomics, Inc. and was partially funded by NIH grant 3P41RR013218-12S1.
@@ -74,128 +64,138 @@ and Steve Pieper, Isomics, Inc. and was partially funded by NIH grant 3P41RR0132
         # Additional initialization step after application startup is complete
         slicer.app.connect("startupCompleted()", registerSampleData)
 
-
 #
-# Register sample data sets in Sample Data module?
+# Register sample data sets in Sample Data module
 #
-
 
 def registerSampleData():
     """Add data sets to Sample Data module."""
-    # It is always recommended to provide sample data for users to make it easy to try the module,
-    # but if no sample data is available then this method (and associated startupCompeted signal connection) can be removed.
-
     import SampleData
 
     iconsPath = os.path.join(os.path.dirname(__file__), "Resources/Icons")
 
-    # To ensure that the source code repository remains small (can be downloaded and installed quickly)
-    # it is recommended to store data sets that are larger than a few MB in a Github release.
-
     # SEEG_masking1
     SampleData.SampleDataLogic.registerCustomSampleDataSource(
-        # Category and sample name displayed in Sample Data module
         category="SEEG_masking",
         sampleName="SEEG_masking1",
-        # Thumbnail should have size of approximately 260x280 pixels and stored in Resources/Icons folder.
-        # It can be created by Screen Capture module, "Capture all views" option enabled, "Number of images" set to "Single".
         thumbnailFileName=os.path.join(iconsPath, "SEEG_masking1.png"),
-        # Download URL and target file name
         uris="https://github.com/Slicer/SlicerTestingData/releases/download/SHA256/998cb522173839c78657f4bc0ea907cea09fd04e44601f17c82ea27927937b95",
         fileNames="SEEG_masking1.nrrd",
-        # Checksum to ensure file integrity. Can be computed by this command:
-        #  import hashlib; print(hashlib.sha256(open(filename, "rb").read()).hexdigest())
         checksums="SHA256:998cb522173839c78657f4bc0ea907cea09fd04e44601f17c82ea27927937b95",
-        # This node name will be used when the data set is loaded
         nodeNames="SEEG_masking1",
     )
 
     # SEEG_masking2
     SampleData.SampleDataLogic.registerCustomSampleDataSource(
-        # Category and sample name displayed in Sample Data module
         category="SEEG_masking",
         sampleName="SEEG_masking2",
         thumbnailFileName=os.path.join(iconsPath, "SEEG_masking2.png"),
-        # Download URL and target file name
         uris="https://github.com/Slicer/SlicerTestingData/releases/download/SHA256/1a64f3f422eb3d1c9b093d1a18da354b13bcf307907c66317e2463ee530b7a97",
         fileNames="SEEG_masking2.nrrd",
         checksums="SHA256:1a64f3f422eb3d1c9b093d1a18da354b13bcf307907c66317e2463ee530b7a97",
-        # This node name will be used when the data set is loaded
         nodeNames="SEEG_masking2",
     )
 
-
 #
-# SEEG_maskingParameterNode
+# SEEG_maskingWidget - Pure Direct UI Access
 #
-@parameterNodeWrapper
-class SEEG_maskingParameterNode:
-    """
-    The parameters needed by module.
-
-    inputVolume - The volume to threshold.
-    outputVolume - The output volume that will contain the thresholded volume.
-    """
-
-    inputVolume: vtkMRMLScalarVolumeNode
-    inputVolumeCT: vtkMRMLScalarVolumeNode 
-    outputVolume: vtkMRMLScalarVolumeNode
-
-
-
-#
-# SEEG_maskingWidget
-#
-
 
 class SEEG_maskingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
-    """Uses ScriptedLoadableModuleWidget base class, available at:
-    https://github.com/Slicer/Slicer/blob/main/Base/Python/slicer/ScriptedLoadableModule.py
-    """
+    """Uses ScriptedLoadableModuleWidget base class with pure direct UI access."""
 
     def __init__(self, parent=None) -> None:
         """Called when the user opens the module the first time and the widget is initialized."""
         ScriptedLoadableModuleWidget.__init__(self, parent)
-        VTKObservationMixin.__init__(self)  # needed for parameter node observation
+        VTKObservationMixin.__init__(self)
         self.logic = None
-        self._parameterNode = None
-        self._parameterNodeGuiTag = None
         self.outputVolumeNode = None  # Track the generated mask volume
 
     def setup(self) -> None:
         """Called when the user opens the module the first time and the widget is initialized."""
         ScriptedLoadableModuleWidget.setup(self)
 
-        # Load widget from .ui file (created by Qt Designer).
-        # Additional widgets can be instantiated manually and added to self.layout.
+        # Load widget from .ui file
         uiWidget = slicer.util.loadUI(self.resourcePath("UI/SEEG_masking.ui"))
         self.layout.addWidget(uiWidget)
         self.ui = slicer.util.childWidgetVariables(uiWidget)
 
-        # Set scene in MRML widgets. Make sure that in Qt designer the top-level qMRMLWidget's
-        # "mrmlSceneChanged(vtkMRMLScene*)" signal in is connected to each MRML widget's.
-        # "setMRMLScene(vtkMRMLScene*)" slot.
+        # Set scene in MRML widgets - This is crucial!
         uiWidget.setMRMLScene(slicer.mrmlScene)
 
-        # Create logic class. Logic implements all computations that should be possible to run
-        # in batch mode, without a graphical user interface.
+        # Create logic class
         self.logic = SEEG_maskingLogic()
 
-        # Connections
+        # Debug: Check what UI elements we have
+        self.debugUIElements()
 
-        # These connections ensure that we update parameter node when scene is closed
-        self.addObserver(slicer.mrmlScene, slicer.mrmlScene.StartCloseEvent, self.onSceneStartClose)
-        self.addObserver(slicer.mrmlScene, slicer.mrmlScene.EndCloseEvent, self.onSceneEndClose)
+        # Configure volume selectors explicitly
+        self.configureVolumeSelectors()
 
-        # Buttons
+        # Connect UI elements directly
         self.ui.applyButton.connect("clicked(bool)", self.onApplyButton)
-        
-        self.ui.saveButton.connect("clicked(bool)", self.onSaveButton) # Save Button
-        # Set up the Save button
-        self.ui.saveButton.setText("Save Mask") # Save Button
+        self.ui.saveButton.connect("clicked(bool)", self.onSaveButton)
+        self.ui.saveButton.setText("Save Mask")
 
-        # Make sure parameter node is initialized (needed for module reload)
-        self.initializeParameterNode()
+        # Connect volume selectors to update button state
+        if hasattr(self.ui, 'inputSelector'):
+            self.ui.inputSelector.connect("currentNodeChanged(vtkMRMLNode*)", self.onInputChanged)
+        if hasattr(self.ui, 'inputSelectorCT'):
+            self.ui.inputSelectorCT.connect("currentNodeChanged(vtkMRMLNode*)", self.onInputChanged)
+
+        # Initial button state check
+        self.updateApplyButtonState()
+
+    def debugUIElements(self):
+        """Debug what UI elements we have access to."""
+        print("=== UI Elements Debug ===")
+        print(f"Available UI attributes: {[attr for attr in dir(self.ui) if not attr.startswith('_')]}")
+        print(f"Has inputSelector: {hasattr(self.ui, 'inputSelector')}")
+        print(f"Has inputSelectorCT: {hasattr(self.ui, 'inputSelectorCT')}")
+        
+        if hasattr(self.ui, 'inputSelector'):
+            print(f"inputSelector type: {type(self.ui.inputSelector)}")
+        if hasattr(self.ui, 'inputSelectorCT'):
+            print(f"inputSelectorCT type: {type(self.ui.inputSelectorCT)}")
+
+    def configureVolumeSelectors(self):
+        """Configure the volume selectors explicitly."""
+        print("=== Configuring Volume Selectors ===")
+        
+        # Configure MRI input selector
+        if hasattr(self.ui, 'inputSelector'):
+            self.ui.inputSelector.setMRMLScene(slicer.mrmlScene)
+            self.ui.inputSelector.nodeTypes = ["vtkMRMLScalarVolumeNode"]
+            self.ui.inputSelector.selectNodeUponCreation = False
+            self.ui.inputSelector.addEnabled = False
+            self.ui.inputSelector.removeEnabled = False
+            self.ui.inputSelector.noneEnabled = True
+            self.ui.inputSelector.showHidden = False
+            self.ui.inputSelector.showChildNodeTypes = False
+            self.ui.inputSelector.setToolTip("Select MRI volume for brain mask generation")
+            print("✓ inputSelector configured")
+        else:
+            print("✗ inputSelector not found!")
+        
+        # Configure CT input selector
+        if hasattr(self.ui, 'inputSelectorCT'):
+            self.ui.inputSelectorCT.setMRMLScene(slicer.mrmlScene)
+            self.ui.inputSelectorCT.nodeTypes = ["vtkMRMLScalarVolumeNode"]
+            self.ui.inputSelectorCT.selectNodeUponCreation = False
+            self.ui.inputSelectorCT.addEnabled = False
+            self.ui.inputSelectorCT.removeEnabled = False
+            self.ui.inputSelectorCT.noneEnabled = True
+            self.ui.inputSelectorCT.showHidden = False
+            self.ui.inputSelectorCT.showChildNodeTypes = False
+            self.ui.inputSelectorCT.setToolTip("Select CT volume for enhancement processing")
+            print("✓ inputSelectorCT configured")
+        else:
+            print("✗ inputSelectorCT not found!")
+
+        # Check available volumes
+        volumes = slicer.util.getNodesByClass("vtkMRMLScalarVolumeNode")
+        print(f"Available volumes in scene: {len(volumes)}")
+        for i, vol in enumerate(volumes):
+            print(f"  {i+1}: {vol.GetName()}")
 
     def cleanup(self) -> None:
         """Called when the application closes and the module widget is destroyed."""
@@ -203,99 +203,152 @@ class SEEG_maskingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
 
     def enter(self) -> None:
         """Called each time the user opens this module."""
-        # Make sure parameter node exists and observed
-        self.initializeParameterNode()
+        # Refresh selectors when entering
+        self.configureVolumeSelectors()
+        self.updateApplyButtonState()
 
     def exit(self) -> None:
         """Called each time the user opens a different module."""
-        # Do not react to parameter node changes (GUI will be updated when the user enters into the module)
-        if self._parameterNode:
-            self._parameterNode.disconnectGui(self._parameterNodeGuiTag)
-            self._parameterNodeGuiTag = None
-            self.removeObserver(self._parameterNode, vtk.vtkCommand.ModifiedEvent, self._checkCanApply)
+        pass
 
-    def onSceneStartClose(self, caller, event) -> None:
-        """Called just before the scene is closed."""
-        # Parameter node will be reset, do not use it anymore
-        self.setParameterNode(None)
+    def onInputChanged(self) -> None:
+        """Called when input volume selection changes."""
+        print("Input selection changed")
+        self.updateApplyButtonState()
 
-    def onSceneEndClose(self, caller, event) -> None:
-        """Called just after the scene is closed."""
-        # If this module is shown while the scene is closed then recreate a new parameter node immediately
-        if self.parent.isEntered:
-            self.initializeParameterNode()
+    def updateApplyButtonState(self) -> None:
+        """Update the Apply button state based on current selections."""
+        # Get current selections
+        input_volume = None
+        input_volume_CT = None
+        
+        if hasattr(self.ui, 'inputSelector'):
+            input_volume = self.ui.inputSelector.currentNode()
+        if hasattr(self.ui, 'inputSelectorCT'):
+            input_volume_CT = self.ui.inputSelectorCT.currentNode()
 
-    def initializeParameterNode(self) -> None:
-        """Ensure parameter node exists and observed."""
-        # Parameter node stores all user choices in parameter values, node selections, etc.
-        # so that when the scene is saved and reloaded, these settings are restored.
+        print(f"Current selections - MRI: {input_volume.GetName() if input_volume else 'None'}, CT: {input_volume_CT.GetName() if input_volume_CT else 'None'}")
 
-        self.setParameterNode(self.logic.getParameterNode())
-
-        # Select default input nodes if nothing is selected yet to save a few clicks for the user
-        if not self._parameterNode.inputVolume:
-            firstVolumeNode = slicer.mrmlScene.GetFirstNodeByClass("vtkMRMLScalarVolumeNode")
-            if firstVolumeNode:
-                self._parameterNode.inputVolume = firstVolumeNode
-
-    def setParameterNode(self, inputParameterNode: Optional[SEEG_maskingParameterNode]) -> None:
-        """
-        Set and observe parameter node.
-        Observation is needed because when the parameter node is changed then the GUI must be updated immediately.
-        """
-
-        if self._parameterNode:
-            self._parameterNode.disconnectGui(self._parameterNodeGuiTag)
-            self.removeObserver(self._parameterNode, vtk.vtkCommand.ModifiedEvent, self._checkCanApply)
-        self._parameterNode = inputParameterNode
-        if self._parameterNode:
-            # Note: in the .ui file, a Qt dynamic property called "SlicerParameterName" is set on each
-            # ui element that needs connection.
-            self._parameterNodeGuiTag = self._parameterNode.connectGui(self.ui)
-            self.addObserver(self._parameterNode, vtk.vtkCommand.ModifiedEvent, self._checkCanApply)
-            self._checkCanApply()
-
-    
-    def _checkCanApply(self, caller=None, event=None) -> None:
-        """  Check if the input volume is selected. """
-        if self._parameterNode and self._parameterNode.inputVolume:
-            self.ui.applyButton.toolTip = _("Compute output volume")
-            self.ui.applyButton.enabled = True
+        # Determine button state
+        canApply = (input_volume is not None and input_volume_CT is not None)
+        
+        if not input_volume and not input_volume_CT:
+            tooltip = "Select both MRI and CT input volumes"
+        elif not input_volume:
+            tooltip = "Select MRI input volume for brain mask generation"
+        elif not input_volume_CT:
+            tooltip = "Select CT input volume for enhancement processing"
         else:
-            self.ui.applyButton.toolTip = _("Select input volume nodes")
-            self.ui.applyButton.enabled = False
+            tooltip = "Generate brain mask and enhance CT volume"
 
-    # Handle 'Apply' button click event (run processing)
+        # Update button
+        if hasattr(self.ui, 'applyButton'):
+            self.ui.applyButton.enabled = canApply
+            self.ui.applyButton.toolTip = _(tooltip)
+
     def onApplyButton(self) -> None:
         """Run processing when user clicks 'Apply' button."""
+        print("Apply button clicked!")
+        
         with slicer.util.tryWithErrorDisplay(_("Failed to compute results."), waitCursor=True):
-            input_volume_node = self.ui.inputSelector.currentNode()
-            input_volume_node_CT = self.ui.inputSelectorCT.currentNode()
             
-            # Generate brain mask
-            self.outputVolumeNode = self.logic.process(input_volume_node)
+            # Get input volumes directly from UI
+            input_volume_node = None
+            input_volume_node_CT = None
             
-            # Initialize CTPEnhancer with model
-            ctp_enhancer = CTPEnhancer()
+            if hasattr(self.ui, 'inputSelector'):
+                input_volume_node = self.ui.inputSelector.currentNode()
+            if hasattr(self.ui, 'inputSelectorCT'):
+                input_volume_node_CT = self.ui.inputSelectorCT.currentNode()
+            
+            print(f"Selected volumes - MRI: {input_volume_node}, CT: {input_volume_node_CT}")
+            
+            # Validate inputs
+            if not input_volume_node:
+                slicer.util.errorDisplay("Please select an MRI input volume for brain mask generation.")
+                return
+                
+            if not input_volume_node_CT:
+                slicer.util.errorDisplay("Please select a CT input volume for enhancement processing.")
+                return
+            
+            logging.info(f"Processing MRI volume: {input_volume_node.GetName()}")
+            logging.info(f"Processing CT volume: {input_volume_node_CT.GetName()}")
+            
+            # Generate brain mask from MRI volume
             try:
-                # Use the predefined MODEL_PATH
+                self.outputVolumeNode = self.logic.process(input_volume_node)
+                if not self.outputVolumeNode:
+                    slicer.util.errorDisplay("Failed to generate brain mask.")
+                    return
+                
+                logging.info(f"Generated brain mask: {self.outputVolumeNode.GetName()}")
+                    
+            except Exception as e:
+                slicer.util.errorDisplay(f"Error generating brain mask: {str(e)}")
+                logging.error(f"Brain mask generation error: {str(e)}")
+                return
+            
+            # Initialize CTPEnhancer and process CT volume
+            try:
+                # Import CTPEnhancer here to avoid import issues
+                from Threshold_mask.ctp_enhancer import CTPEnhancer
+                
+                # Create CTPEnhancer instance
+                ctp_enhancer = CTPEnhancer()
+                
+                # Verify the enhance_ctp method exists and is callable
+                if not hasattr(ctp_enhancer, 'enhance_ctp'):
+                    slicer.util.errorDisplay("CTPEnhancer does not have enhance_ctp method.")
+                    return
+                
+                if not callable(getattr(ctp_enhancer, 'enhance_ctp')):
+                    slicer.util.errorDisplay("enhance_ctp is not callable.")
+                    return
+                
+                print(f"CTPEnhancer instance created successfully: {type(ctp_enhancer)}")
+                print(f"enhance_ctp method: {type(ctp_enhancer.enhance_ctp)}")
+                
+                # Call the enhance_ctp method with simplified parameters
                 enhanced_volumes = ctp_enhancer.enhance_ctp(
                     inputVolume=input_volume_node_CT,
                     inputROI=self.outputVolumeNode,  # Brain mask as ROI
-                    model_path=MODEL_PATH  # Pass model path
-                )
-                slicer.util.infoDisplay(f"Generated {len(enhanced_volumes)} enhanced volumes.")
-            except FileNotFoundError as e:
-                slicer.util.errorDisplay(f"Model file not found: {MODEL_PATH}")
-                logging.error(str(e))
-
+                    outputDir=r"C:\Users\rocia\Downloads\TFG\Cohort\Extension",  
+                    model_path=MODEL_PATH,
     
+                )
+                
+                if enhanced_volumes and len(enhanced_volumes) > 0:
+                    volume_names = list(enhanced_volumes.keys())
+                    slicer.util.infoDisplay(f"Successfully generated {len(enhanced_volumes)} enhanced volumes:\n" + 
+                                        "\n".join(volume_names))
+                    logging.info(f"Enhanced volumes: {volume_names}")
+                else:
+                    slicer.util.warningDisplay("No enhanced volumes were generated.")
+                    
+            except ImportError as e:
+                slicer.util.errorDisplay(f"Failed to import CTPEnhancer: {str(e)}\n\nPlease check that ctp_enhancer.py is in the Threshold_mask directory.")
+                logging.error(f"Import error: {str(e)}")
+            except FileNotFoundError as e:
+                slicer.util.errorDisplay(f"Model file not found: {MODEL_PATH}\n\nPlease check that the model file exists.")
+                logging.error(str(e))
+            except TypeError as e:
+                slicer.util.errorDisplay(f"Type error during CT enhancement: {str(e)}\n\nThis might be a parameter type mismatch.")
+                logging.error(f"Type error: {str(e)}")
+            except Exception as e:
+                slicer.util.errorDisplay(f"Error during CT enhancement: {str(e)}")
+                logging.error(f"CT enhancement error: {str(e)}")
+                # Print more detailed error info for debugging
+                import traceback
+                traceback.print_exc()
+
+
     def onSaveButton(self) -> None:
         """Handle 'Save Mask' button click event."""
         logging.info("Save button clicked!")
 
         if not self.outputVolumeNode:
-            slicer.util.errorDisplay("No mask to save! Apply first.")
+            slicer.util.errorDisplay("No mask to save! Please click 'Apply' first to generate a brain mask.")
             logging.error("No mask to save!")
             return
 
@@ -304,27 +357,34 @@ class SEEG_maskingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         # Create a file dialog
         fileDialog = qt.QFileDialog()
         fileDialog.setAcceptMode(qt.QFileDialog.AcceptSave)
-        fileDialog.setNameFilter("NRRD files (*.nrrd)")
+        fileDialog.setNameFilter("NRRD files (*.nrrd);;All files (*)")
         fileDialog.setDefaultSuffix('nrrd')
         fileDialog.setOption(qt.QFileDialog.ShowDirsOnly, False)
+        
+        # Set default filename
+        default_name = f"BrainMask_{self.outputVolumeNode.GetName()}.nrrd"
+        fileDialog.selectFile(default_name)
 
-        # Show file dialog and get selected folder
+        # Show file dialog and get selected file path
         if fileDialog.exec_():
             savePath = fileDialog.selectedFiles()[0]
             logging.info(f"Selected save path: {savePath}")
 
-            success = slicer.util.saveNode(self.outputVolumeNode, savePath)
+            try:
+                success = slicer.util.saveNode(self.outputVolumeNode, savePath)
 
-            if success:
-                slicer.util.infoDisplay(f"Mask saved to:\n{savePath}")
-                logging.info(f"Mask saved successfully at: {savePath}")
-            else:
-                slicer.util.errorDisplay("Failed to save mask")
-                logging.error("Failed to save mask")
-
+                if success:
+                    slicer.util.infoDisplay(f"Brain mask saved successfully to:\n{savePath}")
+                    logging.info(f"Mask saved successfully at: {savePath}")
+                else:
+                    slicer.util.errorDisplay("Failed to save mask. Please check the file path and permissions.")
+                    logging.error("Failed to save mask")
+            except Exception as e:
+                slicer.util.errorDisplay(f"Error saving mask: {str(e)}")
+                logging.error(f"Error saving mask: {str(e)}")
 
 #
-# SEEG_maskingLogic
+# SEEG_maskingLogic - Simplified without parameter node
 #
 
 class SEEG_maskingLogic:
@@ -334,19 +394,6 @@ class SEEG_maskingLogic:
         """Called when the user opens the module the first time and the widget is initialized."""
         # Initialize the brain mask extractor
         self.maskExtractor = BrainMaskExtractor()
-
-    
-    def createParameterNode(self):
-        """Create and initialize new parameter node"""
-        node = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLScriptedModuleNode")
-        node.SetName("SEEG_maskingParameters")
-        return node
-
-    def getParameterNode(self):
-        node = slicer.mrmlScene.GetFirstNodeByName("SEEG_maskingParameters")
-        if not node:
-            node = self.createParameterNode()
-        return SEEG_maskingParameterNode(node)  
 
     def process(self, inputVolume: vtkMRMLScalarVolumeNode, showResult: bool = True) -> vtkMRMLScalarVolumeNode:
         """
@@ -371,17 +418,13 @@ class SEEG_maskingLogic:
         # Use the brain mask extractor to create the mask
         return self.maskExtractor.extract_mask(inputVolume, threshold_value=20, show_result=showResult)
 
-
 #
 # SEEG_maskingTest
 #
 
-
 class SEEG_maskingTest(ScriptedLoadableModuleTest):
     """
     This is the test case for your scripted module.
-    Uses ScriptedLoadableModuleTest base class, available at:
-    https://github.com/Slicer/Slicer/blob/main/Base/Python/slicer/ScriptedLoadableModule.py
     """
 
     def setUp(self):
@@ -394,17 +437,7 @@ class SEEG_maskingTest(ScriptedLoadableModuleTest):
         self.test_SEEG_masking1()
 
     def test_SEEG_masking1(self):
-        """Ideally you should have several levels of tests.  At the lowest level
-        tests should exercise the functionality of the logic with different inputs
-        (both valid and invalid).  At higher levels your tests should emulate the
-        way the user would interact with your code and confirm that it still works
-        the way you intended.
-        One of the most important features of the tests is that it should alert other
-        developers when their changes will have an impact on the behavior of your
-        module.  For example, if a developer removes a feature that you depend on,
-        your test should break so they know that the feature is needed.
-        """
-
+        """Test the module logic with sample data."""
         self.delayDisplay("Starting the test")
 
         # Get/create input data

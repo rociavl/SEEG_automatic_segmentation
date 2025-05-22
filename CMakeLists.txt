@@ -6,7 +6,7 @@ project(SEEG)
 # Extension meta-information
 set(EXTENSION_HOMEPAGE "https://www.example.com/SEEG")
 set(EXTENSION_CATEGORY "Examples")
-set(EXTENSION_CONTRIBUTORS "Rocio Avalos (AnyWare Corp.)")
+set(EXTENSION_CONTRIBUTORS "Rocio Avalos (UPC.)")
 set(EXTENSION_DESCRIPTION "This extension provides tools for SEEG masking.")
 set(EXTENSION_ICONURL "https://www.example.com/SEEG.png")
 set(EXTENSION_SCREENSHOTURLS "https://www.example.com/SEEG_screenshot.png")
