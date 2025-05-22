@@ -10,7 +10,7 @@ from skimage.filters import gaussian
 from scipy import ndimage
 from skimage import morphology
 
-# Import necessary functions from your enhance_ctp module
+# Import necessary functions 
 from Threshold_mask.enhance_ctp import (
     gamma_correction, 
     sharpen_high_pass, 
@@ -174,7 +174,7 @@ class CTPEnhancer:
         import pandas as pd
         feature_df = pd.DataFrame([features])
         
-        # Ensure we have all expected features
+        # Ensure expected features
         for feat in feature_names:
             if feat not in feature_df.columns:
                 feature_df[feat] = 0  # Add missing features with default value
