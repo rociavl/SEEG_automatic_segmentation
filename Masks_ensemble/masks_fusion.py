@@ -2,13 +2,12 @@ import os
 import numpy as np
 import SimpleITK as sitk
 import matplotlib.pyplot as plt
-import slicer
 from pathlib import Path
 
-class MaskSelector:
+class EnhancedMaskSelector:
     def __init__(self, mask_folder_path, output_dir):
         """
-        Initialize the mask selector with the path to the masks folder and output directory.
+        Initialize the enhanced mask selector with the path to the masks folder and output directory.
         
         Args:
             mask_folder_path: Path to the folder containing mask files
@@ -20,6 +19,9 @@ class MaskSelector:
         
         # Dictionary to store mask arrays
         self.masks = {}
+        # Dictionary to store mask scores
+        self.mask_scores = {}
+        
         self.reference_origin = None
         self.reference_spacing = None
         self.reference_direction = None
@@ -114,7 +116,7 @@ class MaskSelector:
     
     def select_best_masks(self, n_masks=10):
         """
-        Select the best n_masks using the greedy voting strategy.
+        Select the best n_masks using the greedy voting strategy and store their scores.
         
         Args:
             n_masks: Number of masks to select
@@ -135,8 +137,8 @@ class MaskSelector:
         # Initialize list to store selected masks
         selected_masks = []
         
-        # Initialize current vote map (will be updated with each selection)
-        current_vote_map = np.zeros_like(self.global_vote_map)
+        # Clear previous scores
+        self.mask_scores = {}
         
         for i in range(n_masks):
             best_mask_name = None
@@ -156,7 +158,8 @@ class MaskSelector:
                 break
                 
             selected_masks.append(best_mask_name)
-            current_vote_map += remaining_masks[best_mask_name]
+            # Store the score for this mask
+            self.mask_scores[best_mask_name] = best_score
             
             # Remove the selected mask from consideration
             del remaining_masks[best_mask_name]
@@ -165,9 +168,9 @@ class MaskSelector:
         
         return selected_masks
     
-    def create_fused_mask(self, mask_names, output_name):
+    def create_weighted_fused_mask(self, mask_names, output_name):
         """
-        Create a fused mask from the selected masks.
+        Create a fused mask from the selected masks, using their scores as weights.
         
         Args:
             mask_names: List of mask names to fuse
@@ -176,23 +179,56 @@ class MaskSelector:
         Returns:
             fused_mask: The fused mask array
         """
-        # Initialize the fused mask
-        fused_mask = np.zeros_like(next(iter(self.masks.values())))
+        # Initialize the weighted sum and weight accumulator
+        weighted_sum = np.zeros_like(next(iter(self.masks.values())), dtype=float)
+        total_weight = 0
         
-        # Add all selected masks
+        # Add all selected masks with their weights
         for mask_name in mask_names:
-            if mask_name in self.masks:
-                fused_mask += self.masks[mask_name]
+            if mask_name in self.masks and mask_name in self.mask_scores:
+                weight = self.mask_scores[mask_name]
+                weighted_sum += self.masks[mask_name] * weight
+                total_weight += weight
         
-        # Binarize: Consider a voxel as part of the electrode if at least half of the masks agree
-        threshold = len(mask_names)* 0.45
-        fused_mask = np.where(fused_mask >= threshold, 1, 0).astype(np.uint8)
+        # Normalize by total weight
+        if total_weight > 0:
+            weighted_sum /= total_weight
+        
+        # Binarize with threshold of 0.5 (majority of weighted votes)
+        fused_mask = np.where(weighted_sum >= 0.5, 1, 0).astype(np.uint8)
         
         # Save the fused mask
         self.save_mask(fused_mask, output_name)
         
         return fused_mask
     
+    def create_progressive_fused_masks(self, mask_names, base_output_name):
+        """
+        Create a series of incrementally fused masks, adding one mask at a time
+        based on their order in mask_names (which should be ordered by score).
+        
+        Args:
+            mask_names: List of mask names ordered by score
+            base_output_name: Base name for the output fused masks
+        
+        Returns:
+            list of fused masks
+        """
+        fused_masks = []
+        
+        for i in range(1, len(mask_names) + 1):
+            # Get subset of masks
+            subset_masks = mask_names[:i]
+            
+            # Create fused mask from this subset
+            output_name = f"{base_output_name}_{i}_masks"
+            fused_mask = self.create_weighted_fused_mask(subset_masks, output_name)
+            fused_masks.append(fused_mask)
+            
+            print(f"Created progressive fused mask {i} from {len(subset_masks)} masks")
+            
+        return fused_masks
+        
     def save_mask(self, mask_array, output_name):
         """
         Save a mask array as a NRRD file.
@@ -212,20 +248,25 @@ class MaskSelector:
         # Save the mask
         output_path = self.output_dir / f"{output_name}.nrrd"
         sitk.WriteImage(mask_sitk, str(output_path))
-        print(f"Saved fused mask to: {output_path}")
+        print(f"Saved mask to: {output_path}")
     
-    def create_comparison_plots(self, original_masks, selected_masks, fused_original, fused_selected):
+    def create_comparison_plots(self, original_masks, selected_masks, fused_original, fused_selected, plots_dir=None):
         """
-        Create comparison plots between original and selected masks.
+        Create comprehensive comparison plots between original and selected masks for SEEG electrode analysis.
+        These plots help validate the mask selection strategy and assess the quality of the fusion process.
         
         Args:
             original_masks: List of original mask names
             selected_masks: List of selected mask names
             fused_original: Original fused mask array
             fused_selected: Selected fused mask array
+            plots_dir: Directory for saving plots (default: within output_dir)
         """
         # Create a directory for plots
-        plots_dir = self.output_dir / "plots"
+        if plots_dir is None:
+            plots_dir = self.output_dir / "plots"
+        else:
+            plots_dir = Path(plots_dir)
         plots_dir.mkdir(exist_ok=True)
         
         # 1. Plot mask overlap histograms
@@ -237,10 +278,19 @@ class MaskSelector:
         # 3. Plot mask size distribution
         self._plot_mask_size_distribution(original_masks, selected_masks, plots_dir)
         
+        # 4. Plot the scores of selected masks
+        self._plot_mask_scores(selected_masks, plots_dir)
+        
         print(f"Saved comparison plots to: {plots_dir}")
     
     def _plot_mask_overlap(self, original_masks, selected_masks, plots_dir):
-        """Plot histograms showing mask overlap distribution"""
+        """
+        Plot histograms showing voxel-wise agreement across masks.
+        
+        This visualization helps understand the consensus patterns in brain segmentation,
+        which is crucial for SEEG electrode localization accuracy. Higher agreement values
+        indicate regions where multiple segmentation approaches consistently identify brain tissue.
+        """
         # Compute original overlap
         original_vote_map = np.zeros_like(next(iter(self.masks.values())))
         for mask_name in original_masks:
@@ -253,40 +303,77 @@ class MaskSelector:
             if mask_name in self.masks:
                 selected_vote_map += self.masks[mask_name]
         
-        # Create histograms
-        plt.figure(figsize=(12, 6))
+        # Create enhanced histograms with medical context
+        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 6))
         
         # Original masks overlap histogram
-        plt.subplot(1, 2, 1)
-        max_votes = len(original_masks)
-        plt.hist(original_vote_map[original_vote_map > 0].flatten(), 
-                 bins=range(1, max_votes + 2), 
-                 alpha=0.7, 
-                 color='blue')
-        plt.title(f"Original Masks Overlap Distribution (n={len(original_masks)})")
-        plt.xlabel("Number of Masks Agreeing")
-        plt.ylabel("Voxel Count")
-        plt.grid(True, alpha=0.3)
+        max_votes_orig = len(original_masks)
+        counts_orig, _, _ = ax1.hist(original_vote_map[original_vote_map > 0].flatten(), 
+                                    bins=range(1, max_votes_orig + 2), 
+                                    alpha=0.7, 
+                                    color='steelblue',
+                                    edgecolor='navy',
+                                    linewidth=0.8)
+        ax1.set_title(f"Original Masks: Inter-Rater Agreement Distribution\n"
+                     f"Total Masks: {len(original_masks)} | Brain Segmentation Consensus", 
+                     fontsize=12, fontweight='bold')
+        ax1.set_xlabel("Number of Masks in Agreement\n(Higher values = stronger consensus)", fontsize=10)
+        ax1.set_ylabel("Voxel Count", fontsize=10)
+        ax1.grid(True, alpha=0.3, linestyle='--')
+        
+        # Add percentage annotations on bars
+        total_voxels_orig = np.sum(counts_orig)
+        for i, count in enumerate(counts_orig):
+            if count > 0:
+                percentage = (count / total_voxels_orig) * 100
+                ax1.text(i + 1, count + max(counts_orig) * 0.01, 
+                        f'{percentage:.1f}%', 
+                        ha='center', va='bottom', fontsize=8, fontweight='bold')
         
         # Selected masks overlap histogram
-        plt.subplot(1, 2, 2)
-        max_votes = len(selected_masks)
-        plt.hist(selected_vote_map[selected_vote_map > 0].flatten(), 
-                 bins=range(1, max_votes + 2), 
-                 alpha=0.7, 
-                 color='green')
-        plt.title(f"Selected Masks Overlap Distribution (n={len(selected_masks)})")
-        plt.xlabel("Number of Masks Agreeing")
-        plt.ylabel("Voxel Count")
-        plt.grid(True, alpha=0.3)
+        max_votes_sel = len(selected_masks)
+        counts_sel, _, _ = ax2.hist(selected_vote_map[selected_vote_map > 0].flatten(), 
+                                   bins=range(1, max_votes_sel + 2), 
+                                   alpha=0.7, 
+                                   color='forestgreen',
+                                   edgecolor='darkgreen',
+                                   linewidth=0.8)
+        ax2.set_title(f"Selected Masks: Optimized Agreement Distribution\n"
+                     f"Selected: {len(selected_masks)} masks | Enhanced Consensus Quality", 
+                     fontsize=12, fontweight='bold')
+        ax2.set_xlabel("Number of Masks in Agreement\n(Optimized for electrode localization)", fontsize=10)
+        ax2.set_ylabel("Voxel Count", fontsize=10)
+        ax2.grid(True, alpha=0.3, linestyle='--')
+        
+        # Add percentage annotations on bars
+        total_voxels_sel = np.sum(counts_sel)
+        for i, count in enumerate(counts_sel):
+            if count > 0:
+                percentage = (count / total_voxels_sel) * 100
+                ax2.text(i + 1, count + max(counts_sel) * 0.01, 
+                        f'{percentage:.1f}%', 
+                        ha='center', va='bottom', fontsize=8, fontweight='bold')
+        
+        # Add interpretation text
+        fig.text(0.5, 0.02, 
+                "Interpretation: Higher agreement values indicate more reliable brain tissue identification.\n"
+                "This is critical for accurate SEEG electrode placement and trajectory planning.",
+                ha='center', fontsize=9, style='italic', 
+                bbox=dict(boxstyle="round,pad=0.3", facecolor='lightgray', alpha=0.5))
         
         plt.tight_layout()
-        plt.savefig(plots_dir / "mask_overlap_histogram.png", dpi=300)
+        plt.subplots_adjust(bottom=0.15)
+        plt.savefig(plots_dir / "mask_overlap_histogram.png", dpi=300, bbox_inches='tight')
         plt.close()
     
     def _plot_dice_scores(self, original_masks, selected_masks, fused_original, fused_selected, plots_dir):
-        """Plot Dice scores comparing each mask to the fused mask"""
-        plt.figure(figsize=(10, 6))
+        """
+        Plot Dice similarity coefficients comparing individual masks to fused consensus masks.
+        
+        Dice scores measure spatial overlap quality, essential for validating brain segmentation
+        accuracy in SEEG procedures. Higher scores indicate better agreement with the consensus.
+        """
+        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 6))
         
         # Compute Dice scores for original masks
         original_scores = []
@@ -302,30 +389,75 @@ class MaskSelector:
                 score = self.dice_score(self.masks[mask_name], fused_selected)
                 selected_scores.append(score)
         
-        # Create bar plot
-        x = np.arange(len(original_masks))
-        width = 0.35
+        # Create enhanced bar plots
+        x_orig = np.arange(len(original_scores))
+        x_sel = np.arange(len(selected_scores))
         
-        plt.bar(x - width/2, original_scores, width, label='Original Masks', alpha=0.7)
-        plt.bar(x[:len(selected_scores)] + width/2, selected_scores, width, label='Selected Masks', alpha=0.7)
+        # Original masks plot
+        bars1 = ax1.bar(x_orig, original_scores, alpha=0.7, color='steelblue', 
+                       edgecolor='navy', linewidth=0.8)
+        ax1.axhline(y=np.mean(original_scores), color='red', linestyle='--', 
+                   label=f'Mean: {np.mean(original_scores):.3f}', linewidth=2)
+        ax1.set_xlabel('Mask Index', fontsize=10)
+        ax1.set_ylabel('Dice Similarity Coefficient', fontsize=10)
+        ax1.set_title(f'Original Masks vs. Consensus\n'
+                     f'Mean Dice: {np.mean(original_scores):.3f} ± {np.std(original_scores):.3f}', 
+                     fontsize=12, fontweight='bold')
+        ax1.legend()
+        ax1.grid(True, alpha=0.3, linestyle='--')
+        ax1.set_ylim(0, 1.05)
         
-        plt.xlabel('Mask Index')
-        plt.ylabel('Dice Score')
-        plt.title('Dice Score Comparison with Fused Mask')
-        plt.legend()
-        plt.grid(True, alpha=0.3)
+        # Add value labels on bars
+        for bar, score in zip(bars1, original_scores):
+            height = bar.get_height()
+            ax1.text(bar.get_x() + bar.get_width()/2., height + 0.01,
+                    f'{score:.3f}', ha='center', va='bottom', fontsize=8, rotation=45)
+        
+        # Selected masks plot
+        bars2 = ax2.bar(x_sel, selected_scores, alpha=0.7, color='forestgreen', 
+                       edgecolor='darkgreen', linewidth=0.8)
+        ax2.axhline(y=np.mean(selected_scores), color='red', linestyle='--', 
+                   label=f'Mean: {np.mean(selected_scores):.3f}', linewidth=2)
+        ax2.set_xlabel('Selected Mask Index', fontsize=10)
+        ax2.set_ylabel('Dice Similarity Coefficient', fontsize=10)
+        ax2.set_title(f'Selected Masks vs. Optimized Consensus\n'
+                     f'Mean Dice: {np.mean(selected_scores):.3f} ± {np.std(selected_scores):.3f}', 
+                     fontsize=12, fontweight='bold')
+        ax2.legend()
+        ax2.grid(True, alpha=0.3, linestyle='--')
+        ax2.set_ylim(0, 1.05)
+        
+        # Add value labels on bars
+        for bar, score in zip(bars2, selected_scores):
+            height = bar.get_height()
+            ax2.text(bar.get_x() + bar.get_width()/2., height + 0.01,
+                    f'{score:.3f}', ha='center', va='bottom', fontsize=8, rotation=45)
+        
+        # Add clinical interpretation
+        improvement = np.mean(selected_scores) - np.mean(original_scores)
+        fig.text(0.5, 0.02, 
+                f"Clinical Impact: Dice improvement of {improvement:+.3f} enhances brain boundary accuracy.\n"
+                f"Values >0.8 indicate excellent segmentation quality for SEEG electrode localization.",
+                ha='center', fontsize=9, style='italic',
+                bbox=dict(boxstyle="round,pad=0.3", facecolor='lightgreen' if improvement > 0 else 'lightcoral', alpha=0.5))
         
         plt.tight_layout()
-        plt.savefig(plots_dir / "dice_score_comparison.png", dpi=300)
+        plt.subplots_adjust(bottom=0.15)
+        plt.savefig(plots_dir / "dice_score_comparison.png", dpi=300, bbox_inches='tight')
         plt.close()
         
-        print(f"Original masks average Dice: {np.mean(original_scores):.3f}")
-        print(f"Selected masks average Dice: {np.mean(selected_scores):.3f}")
+        print(f"Segmentation Quality Assessment:")
+        print(f"  Original masks average Dice: {np.mean(original_scores):.3f} ± {np.std(original_scores):.3f}")
+        print(f"  Selected masks average Dice: {np.mean(selected_scores):.3f} ± {np.std(selected_scores):.3f}")
+        print(f"  Quality improvement: {improvement:+.3f} ({improvement/np.mean(original_scores)*100:+.1f}%)")
     
     def _plot_mask_size_distribution(self, original_masks, selected_masks, plots_dir):
-        """Plot the distribution of mask sizes"""
-        plt.figure(figsize=(10, 6))
+        """
+        Analyze and visualize brain mask size distributions.
         
+        Mask size analysis helps identify potential outliers and ensures consistent
+        brain volume estimation, which affects electrode trajectory planning accuracy.
+        """
         # Compute sizes for original masks
         original_sizes = []
         for mask_name in original_masks:
@@ -338,55 +470,402 @@ class MaskSelector:
             if mask_name in self.masks:
                 selected_sizes.append(np.sum(self.masks[mask_name]))
         
-        # Create box plot
-        plt.boxplot([original_sizes, selected_sizes], 
-                   tick_labels=[f'Original (n={len(original_sizes)})', f'Selected (n={len(selected_sizes)})'])
+        # Create enhanced visualization
+        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 6))
         
-        plt.ylabel('Mask Size (voxels)')
-        plt.title('Mask Size Distribution')
-        plt.grid(True, alpha=0.3)
+        # Box plot comparison
+        box_data = [original_sizes, selected_sizes]
+        box_labels = [f'Original\n(n={len(original_sizes)})', f'Selected\n(n={len(selected_sizes)})']
+        
+        bp = ax1.boxplot(box_data, tick_labels=box_labels, patch_artist=True,
+                        boxprops=dict(facecolor='lightblue', alpha=0.7),
+                        medianprops=dict(color='red', linewidth=2),
+                        whiskerprops=dict(linewidth=1.5),
+                        capprops=dict(linewidth=1.5))
+        
+        # Color the boxes differently
+        bp['boxes'][0].set_facecolor('steelblue')
+        bp['boxes'][1].set_facecolor('forestgreen')
+        
+        ax1.set_ylabel('Brain Mask Size (voxels)', fontsize=10)
+        ax1.set_title('Brain Volume Distribution Analysis\nConsistency Check for SEEG Planning', 
+                     fontsize=12, fontweight='bold')
+        ax1.grid(True, alpha=0.3, linestyle='--')
+        
+        # Add statistical annotations
+        orig_stats = f"μ={np.mean(original_sizes):.0f}, σ={np.std(original_sizes):.0f}"
+        sel_stats = f"μ={np.mean(selected_sizes):.0f}, σ={np.std(selected_sizes):.0f}"
+        ax1.text(1, max(original_sizes) * 0.9, orig_stats, ha='center', fontsize=8,
+                bbox=dict(boxstyle="round,pad=0.3", facecolor='steelblue', alpha=0.3))
+        ax1.text(2, max(selected_sizes) * 0.9, sel_stats, ha='center', fontsize=8,
+                bbox=dict(boxstyle="round,pad=0.3", facecolor='forestgreen', alpha=0.3))
+        
+        # Histogram overlay
+        ax2.hist(original_sizes, bins=15, alpha=0.6, color='steelblue', 
+                label=f'Original (n={len(original_sizes)})', density=True, edgecolor='navy')
+        ax2.hist(selected_sizes, bins=15, alpha=0.6, color='forestgreen', 
+                label=f'Selected (n={len(selected_sizes)})', density=True, edgecolor='darkgreen')
+        
+        ax2.axvline(np.mean(original_sizes), color='steelblue', linestyle='--', linewidth=2, alpha=0.8)
+        ax2.axvline(np.mean(selected_sizes), color='forestgreen', linestyle='--', linewidth=2, alpha=0.8)
+        
+        ax2.set_xlabel('Brain Mask Size (voxels)', fontsize=10)
+        ax2.set_ylabel('Density', fontsize=10)
+        ax2.set_title('Size Distribution Comparison\nVolume Consistency Assessment', 
+                     fontsize=12, fontweight='bold')
+        ax2.legend()
+        ax2.grid(True, alpha=0.3, linestyle='--')
+        
+        # Add clinical context
+        volume_ml_orig = np.mean(original_sizes) * np.prod(self.reference_spacing) / 1000  # Convert to mL
+        volume_ml_sel = np.mean(selected_sizes) * np.prod(self.reference_spacing) / 1000
+        
+        fig.text(0.5, 0.02, 
+                f"Clinical Context: Average brain volumes - Original: {volume_ml_orig:.0f}mL, Selected: {volume_ml_sel:.0f}mL\n"
+                f"Consistent volumes ensure reliable electrode trajectory calculations and anatomical targeting.",
+                ha='center', fontsize=9, style='italic',
+                bbox=dict(boxstyle="round,pad=0.3", facecolor='lightyellow', alpha=0.5))
         
         plt.tight_layout()
-        plt.savefig(plots_dir / "mask_size_distribution.png", dpi=300)
+        plt.subplots_adjust(bottom=0.15)
+        plt.savefig(plots_dir / "mask_size_distribution.png", dpi=300, bbox_inches='tight')
         plt.close()
         
-        print(f"Original masks average size: {np.mean(original_sizes):.1f} voxels")
-        print(f"Selected masks average size: {np.mean(selected_sizes):.1f} voxels")
+        print(f"Brain Volume Analysis:")
+        print(f"  Original masks: {np.mean(original_sizes):.0f} ± {np.std(original_sizes):.0f} voxels "
+              f"({volume_ml_orig:.0f} ± {np.std(original_sizes) * np.prod(self.reference_spacing) / 1000:.0f} mL)")
+        print(f"  Selected masks: {np.mean(selected_sizes):.0f} ± {np.std(selected_sizes):.0f} voxels "
+              f"({volume_ml_sel:.0f} ± {np.std(selected_sizes) * np.prod(self.reference_spacing) / 1000:.0f} mL)")
+    
+    def _plot_mask_scores(self, selected_masks, plots_dir):
+        """
+        Visualize the overlap scores that guided mask selection.
+        
+        These scores represent each mask's contribution to the global consensus,
+        crucial for understanding the quality ranking in SEEG electrode segmentation.
+        """
+        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 6))
+        
+        scores = [self.mask_scores[mask_name] for mask_name in selected_masks if mask_name in self.mask_scores]
+        mask_indices = range(1, len(scores) + 1)
+        
+        # Create enhanced bar plot of scores
+        bars = ax1.bar(mask_indices, scores, alpha=0.8, color='purple', 
+                      edgecolor='darkviolet', linewidth=1.2)
+        
+        # Color gradient based on score
+        norm = plt.Normalize(min(scores), max(scores))
+        colors = plt.cm.viridis(norm(scores))
+        for bar, color in zip(bars, colors):
+            bar.set_color(color)
+        
+        ax1.set_xlabel('Mask Selection Order (Best to Worst)', fontsize=10)
+        ax1.set_ylabel('Overlap Score with Global Consensus', fontsize=10)
+        ax1.set_title('Mask Quality Ranking for SEEG Analysis\n'
+                     'Higher Scores = Better Consensus Agreement', 
+                     fontsize=12, fontweight='bold')
+        ax1.grid(True, alpha=0.3, linestyle='--')
+        
+        # Add score values on top of bars
+        for i, (bar, score) in enumerate(zip(bars, scores)):
+            height = bar.get_height()
+            ax1.text(bar.get_x() + bar.get_width()/2., height + max(scores) * 0.01,
+                    f'{score:.3f}', ha='center', va='bottom', fontsize=9, fontweight='bold')
+            
+            # Add rank labels
+            ax1.text(bar.get_x() + bar.get_width()/2., height * 0.5,
+                    f'#{i+1}', ha='center', va='center', fontsize=10, 
+                    color='white', fontweight='bold')
+        
+        # Score distribution and trends
+        ax2.plot(mask_indices, scores, marker='o', linestyle='-', linewidth=3, 
+                markersize=8, color='purple', markerfacecolor='white', 
+                markeredgewidth=2, markeredgecolor='purple')
+        ax2.fill_between(mask_indices, scores, alpha=0.3, color='purple')
+        
+        # Add trend line
+        z = np.polyfit(mask_indices, scores, 1)
+        p = np.poly1d(z)
+        ax2.plot(mask_indices, p(mask_indices), "--", color='red', linewidth=2, 
+                label=f'Trend: slope={z[0]:.4f}')
+        
+        ax2.set_xlabel('Mask Selection Order', fontsize=10)
+        ax2.set_ylabel('Overlap Score', fontsize=10)
+        ax2.set_title('Score Progression Analysis\n'
+                     'Quality Degradation Pattern', 
+                     fontsize=12, fontweight='bold')
+        ax2.grid(True, alpha=0.3, linestyle='--')
+        ax2.legend()
+        
+        # Add percentile markers
+        score_percentiles = [90, 75, 50, 25]
+        percentile_values = np.percentile(scores, score_percentiles)
+        for p, val in zip(score_percentiles, percentile_values):
+            ax2.axhline(y=val, color='gray', linestyle=':', alpha=0.7)
+            ax2.text(len(scores) * 0.95, val, f'{p}th %ile', fontsize=8, alpha=0.7)
+        
+        # Add selection quality assessment
+        score_range = max(scores) - min(scores)
+        consistency = 1 - (np.std(scores) / np.mean(scores))
+        
+        fig.text(0.5, 0.02, 
+                f"Selection Quality: Range={score_range:.3f}, Consistency={consistency:.3f}\n"
+                f"These scores guide optimal mask selection for precise SEEG electrode localization.",
+                ha='center', fontsize=9, style='italic',
+                bbox=dict(boxstyle="round,pad=0.3", facecolor='plum', alpha=0.5))
+        
+        plt.tight_layout()
+        plt.subplots_adjust(bottom=0.15)
+        plt.savefig(plots_dir / "mask_scores.png", dpi=300, bbox_inches='tight')
+        plt.close()
+        
+        print(f"Mask Selection Quality Metrics:")
+        print(f"  Score range: {score_range:.3f}")
+        print(f"  Score consistency: {consistency:.3f}")
+        print(f"  Best mask score: {max(scores):.3f}")
+        print(f"  Worst selected mask score: {min(scores):.3f}")
+    
+    def plot_progressive_fused_masks_comparison(self, progressive_masks, plots_dir=None):
+        """
+        Analyze the progressive fusion process to understand how mask quality evolves.
+        
+        This analysis is crucial for determining the optimal number of masks needed
+        for reliable brain segmentation in SEEG electrode placement procedures.
+        
+        Args:
+            progressive_masks: List of progressively fused mask arrays
+            plots_dir: Directory for saving plots
+        """
+        if plots_dir is None:
+            plots_dir = self.output_dir / "plots"
+        else:
+            plots_dir = Path(plots_dir)
+        plots_dir.mkdir(exist_ok=True)
+        
+        # Enhanced plot for mask sizes progression
+        fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(16, 12))
+        
+        sizes = [np.sum(mask) for mask in progressive_masks]
+        mask_indices = range(1, len(sizes) + 1)
+        
+        # 1. Mask size progression
+        ax1.plot(mask_indices, sizes, marker='o', linestyle='-', linewidth=3, 
+                markersize=8, color='darkblue', markerfacecolor='lightblue', 
+                markeredgewidth=2, markeredgecolor='darkblue')
+        ax1.fill_between(mask_indices, sizes, alpha=0.3, color='lightblue')
+        
+        # Add trend analysis
+        if len(sizes) > 2:
+            z = np.polyfit(mask_indices, sizes, 1)
+            p = np.poly1d(z)
+            ax1.plot(mask_indices, p(mask_indices), "--", color='red', linewidth=2, 
+                    label=f'Trend: {z[0]:+.1f} voxels/mask')
+            ax1.legend()
+        
+        ax1.set_xlabel('Number of Masks in Progressive Fusion', fontsize=10)
+        ax1.set_ylabel('Brain Mask Size (voxels)', fontsize=10)
+        ax1.set_title('Progressive Fusion: Brain Volume Evolution\n'
+                     'Convergence to Optimal Brain Boundary', 
+                     fontsize=12, fontweight='bold')
+        ax1.grid(True, alpha=0.3, linestyle='--')
+        ax1.set_xticks(mask_indices)
+        
+        # Add size annotations
+        for i, size in enumerate(sizes):
+            ax1.text(i + 1, size + max(sizes) * 0.02, f'{size:,}', 
+                    ha='center', va='bottom', fontsize=8, rotation=45)
+        
+        # 2. Size change rate
+        if len(sizes) > 1:
+            size_changes = [sizes[i] - sizes[i-1] for i in range(1, len(sizes))]
+            change_indices = range(2, len(sizes) + 1)
+            
+            colors = ['green' if change >= 0 else 'red' for change in size_changes]
+            bars = ax2.bar(change_indices, size_changes, color=colors, alpha=0.7, 
+                          edgecolor='black', linewidth=0.8)
+            
+            ax2.axhline(y=0, color='black', linestyle='-', linewidth=1)
+            ax2.set_xlabel('Fusion Step (Adding Nth Mask)', fontsize=10)
+            ax2.set_ylabel('Volume Change (voxels)', fontsize=10)
+            ax2.set_title('Incremental Volume Changes\n'
+                         'Impact of Each Additional Mask', 
+                         fontsize=12, fontweight='bold')
+            ax2.grid(True, alpha=0.3, linestyle='--')
+            
+            # Add change annotations
+            for bar, change in zip(bars, size_changes):
+                height = bar.get_height()
+                ax2.text(bar.get_x() + bar.get_width()/2., 
+                        height + (max(size_changes) - min(size_changes)) * 0.02 * (1 if height >= 0 else -1),
+                        f'{change:+,}', ha='center', 
+                        va='bottom' if height >= 0 else 'top', fontsize=8)
+        
+        # 3. Dice similarity between consecutive masks
+        if len(progressive_masks) > 1:
+            dice_scores = []
+            for i in range(1, len(progressive_masks)):
+                dice = self.dice_score(progressive_masks[i-1], progressive_masks[i])
+                dice_scores.append(dice)
+            
+            ax3.plot(range(2, len(progressive_masks) + 1), dice_scores, 
+                    marker='s', linestyle='-', linewidth=3, markersize=8, 
+                    color='green', markerfacecolor='lightgreen', 
+                    markeredgewidth=2, markeredgecolor='darkgreen')
+            ax3.fill_between(range(2, len(progressive_masks) + 1), dice_scores, 
+                           alpha=0.3, color='lightgreen')
+            
+            # Add stability threshold
+            stability_threshold = 0.95
+            ax3.axhline(y=stability_threshold, color='orange', linestyle='--', 
+                       linewidth=2, label=f'Stability Threshold ({stability_threshold})')
+            ax3.legend()
+            
+            ax3.set_xlabel('Number of Masks in Fusion', fontsize=10)
+            ax3.set_ylabel('Dice Similarity to Previous Step', fontsize=10)
+            ax3.set_title('Fusion Stability Analysis\n'
+                         'Convergence to Stable Brain Boundary', 
+                         fontsize=12, fontweight='bold')
+            ax3.grid(True, alpha=0.3, linestyle='--')
+            ax3.set_xticks(range(2, len(progressive_masks) + 1))
+            ax3.set_ylim(0.8, 1.02)
+            
+            # Add annotations for convergence
+            for i, dice in enumerate(dice_scores):
+                ax3.text(i + 2, dice + 0.005, f'{dice:.3f}', 
+                        ha='center', va='bottom', fontsize=8)
+            
+            # Find optimal number of masks (where stability is achieved)
+            stable_indices = [i for i, score in enumerate(dice_scores) if score >= stability_threshold]
+            if stable_indices:
+                optimal_n = stable_indices[0] + 2  # +2 because dice_scores starts from index 2
+                ax3.axvline(x=optimal_n, color='red', linestyle=':', linewidth=2, 
+                           label=f'Optimal N={optimal_n}')
+                ax3.legend()
+        
+        # 4. Efficiency analysis - Quality vs Number of Masks
+        # Calculate a quality metric combining size stability and Dice scores
+        if len(progressive_masks) > 1 and 'dice_scores' in locals():
+            # Normalize metrics
+            size_stability = [1 - abs(change)/max(sizes) for change in size_changes] if len(size_changes) > 0 else []
+            dice_stability = dice_scores
+            
+            if len(size_stability) == len(dice_stability):
+                efficiency_scores = [(d + s)/2 for d, s in zip(dice_stability, size_stability)]
+                
+                ax4.plot(range(2, len(progressive_masks) + 1), efficiency_scores, 
+                        marker='D', linestyle='-', linewidth=3, markersize=8, 
+                        color='purple', markerfacecolor='plum', 
+                        markeredgewidth=2, markeredgecolor='purple')
+                ax4.fill_between(range(2, len(progressive_masks) + 1), efficiency_scores, 
+                               alpha=0.3, color='plum')
+                
+                # Find the knee point (optimal efficiency)
+                if len(efficiency_scores) >= 3:
+                    # Simple knee detection - look for diminishing returns
+                    improvements = [efficiency_scores[i] - efficiency_scores[i-1] 
+                                  for i in range(1, len(efficiency_scores))]
+                    if improvements:
+                        knee_idx = next((i for i, imp in enumerate(improvements) 
+                                       if imp < 0.01), len(improvements))
+                        knee_point = knee_idx + 3  # +3 because we start from index 2 and add 1
+                        
+                        ax4.axvline(x=knee_point, color='red', linestyle='--', linewidth=2, 
+                                   label=f'Efficiency Knee Point (N={knee_point})')
+                        ax4.legend()
+                
+                ax4.set_xlabel('Number of Masks in Fusion', fontsize=10)
+                ax4.set_ylabel('Combined Efficiency Score', fontsize=10)
+                ax4.set_title('Fusion Efficiency Analysis\n'
+                             'Optimal Balance of Quality vs. Complexity', 
+                             fontsize=12, fontweight='bold')
+                ax4.grid(True, alpha=0.3, linestyle='--')
+                ax4.set_xticks(range(2, len(progressive_masks) + 1))
+                ax4.set_ylim(0, 1.05)
+        
+        # Add comprehensive clinical interpretation
+        volume_ml = [size * np.prod(self.reference_spacing) / 1000 for size in sizes]
+        final_volume = volume_ml[-1] if volume_ml else 0
+        volume_stability = np.std(volume_ml[-3:]) if len(volume_ml) >= 3 else np.std(volume_ml)
+        
+        fig.text(0.5, 0.02, 
+                f"Clinical Summary: Final brain volume = {final_volume:.0f}mL, "
+                f"Volume stability = ±{volume_stability:.1f}mL\n"
+                f"Progressive fusion analysis guides optimal mask selection for SEEG electrode trajectory planning.\n"
+                f"Stable convergence ensures reliable anatomical targeting and surgical safety.",
+                ha='center', fontsize=10, style='italic',
+                bbox=dict(boxstyle="round,pad=0.5", facecolor='lightcyan', alpha=0.7))
+        
+        plt.tight_layout()
+        plt.subplots_adjust(bottom=0.12)
+        plt.savefig(plots_dir / "progressive_fusion_analysis.png", dpi=300, bbox_inches='tight')
+        plt.close()
+        
+        # Print detailed analysis
+        print(f"\nProgressive Fusion Analysis:")
+        print(f"  Final brain volume: {final_volume:.0f} mL")
+        print(f"  Volume range: {min(volume_ml):.0f} - {max(volume_ml):.0f} mL")
+        print(f"  Volume stability (last 3): ±{volume_stability:.1f} mL")
+        if 'dice_scores' in locals():
+            print(f"  Average Dice stability: {np.mean(dice_scores):.3f}")
+            print(f"  Minimum Dice score: {min(dice_scores):.3f}")
+        if 'optimal_n' in locals():
+            print(f"  Recommended optimal masks: {optimal_n}")
 
-# Main execution function
 def main():
-    # Paths
-    mask_folder_path = r"C:\Users\rocia\Downloads\P1_ELECTRODES_MASK"
-    output_dir = r"C:\Users\rocia\Downloads\TFG\Cohort\Enhance_ctp_tests\P1_weighted_fusion_fix"
+    """
+    Main execution function to select and fuse the best masks for SEEG electrode analysis
+    """
+    # Paths - update these to your actual paths
+    mask_folder_path = r"C:\Users\rocia\Downloads\P6_ELECTRODES_MASK"
+    output_dir = r"C:\Users\rocia\Downloads\TFG\Cohort\Enhance_ctp_tests\P6_weighted_fusion_fix_enhanced_plots"
     
-    # Initialize the mask selector
-    selector = MaskSelector(mask_folder_path, output_dir)
+    # Initialize the enhanced mask selector
+    selector = EnhancedMaskSelector(mask_folder_path, output_dir)
     
-    # Select the best 10 masks
+    # Compute global agreement map across all masks
+    selector.compute_global_agreement()
+    
+    # Select the best 10 masks based on their overlap score with the global vote map
     selected_masks = selector.select_best_masks(n_masks=10)
     
-    # Create fused masks for both all masks and the selected masks
+    # Save the individual top 10 masks
+    for i, mask_name in enumerate(selected_masks, 1):
+        selector.save_mask(selector.masks[mask_name], f"P6_top_mask_{i}")
+    
+    # Get all mask names for reference
     all_mask_names = list(selector.masks.keys())
     
-    # Create and save the fused mask from all masks
-    fused_all = selector.create_fused_mask(all_mask_names, "P1_mask_all_fused_ml")
+    # Create a traditional fused mask from all masks (for comparison)
+    # This uses a simple threshold of 45% agreement
+    all_vote_map = np.zeros_like(next(iter(selector.masks.values())))
+    for mask_name in all_mask_names:
+        all_vote_map += selector.masks[mask_name]
+    threshold = len(all_mask_names) * 0.45
+    fused_all = np.where(all_vote_map >= threshold, 1, 0).astype(np.uint8)
+    selector.save_mask(fused_all, "P6_all_masks_fused_traditional")
     
-    # Create individual fused masks for the 10 selected masks
-    for i, mask_name in enumerate(selected_masks, 1):
-        selector.save_mask(selector.masks[mask_name], f"P1_mask_{i}_fused_ml")
+    # Create a single weighted fused mask from the top 10 masks
+    fused_weighted = selector.create_weighted_fused_mask(selected_masks, "P6_top10_weighted_fused")
     
-    # Create and save the fused mask from selected masks
-    fused_selected = selector.create_fused_mask(selected_masks, "P1_mask_selected_fused_ml")
+    # Create 10 progressive fused masks, incrementally adding one mask at a time
+    # based on their score (from highest to lowest)
+    progressive_masks = selector.create_progressive_fused_masks(selected_masks, "P6_progressive")
     
     # Create comparison plots
-    selector.create_comparison_plots(all_mask_names, selected_masks, fused_all, fused_selected)
+    selector.create_comparison_plots(all_mask_names, selected_masks, fused_all, fused_weighted)
     
-    print(f"Selected masks: {selected_masks}")
-    print("Processing complete!")
+    # Plot additional comparisons for the progressive masks
+    selector.plot_progressive_fused_masks_comparison(progressive_masks)
+    
+    # Print mask scores for reference
+    print("\nSelected mask scores:")
+    for i, mask_name in enumerate(selected_masks, 1):
+        score = selector.mask_scores.get(mask_name, 0)
+        print(f"{i}. {mask_name}: {score:.4f}")
+    
+    print("\nProcessing complete!")
 
-# Run the script
 if __name__ == "__main__":
     main()
 
-
-#exec(open('C:\Users\rocia\AppData\Local\slicer.org\Slicer 5.6.2\SEEG_module\SEEG_masking\Masks_ensemble\masks_fusion.py').read())
+#exec(open(r'C:\Users\rocia\AppData\Local\slicer.org\Slicer 5.6.2\SEEG_module\SEEG_masking\Masks_ensemble\masks_fusion.py').read())
