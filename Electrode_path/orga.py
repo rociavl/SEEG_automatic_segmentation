@@ -41,8 +41,8 @@ from Outermost_centroids_coordinates.outermost_centroids_vol_slicer import (
     filter_centroids_by_surface_distance
 )
 from End_points.midplane_prueba import get_all_centroids
-from Electrode_path.orga import (create_summary_page, create_trajectory_details_page, create_noise_points_page, create_pca_angle_analysis_page, visualize_combined_results)
-
+from Electrode_path.construction_4 import (create_summary_page, create_3d_visualization,
+    create_trajectory_details_page, create_noise_points_page)
 #------------------------------------------------------------------------------
 # PART 1: UTILITY CLASSES AND FUNCTIONS
 #------------------------------------------------------------------------------
@@ -4261,6 +4261,387 @@ def validate_entry_angles(bolt_directions, min_angle=25, max_angle=60):
     
     return validation_results
 
+#------------------------------------------------------------------------------
+# PART 2.9: HEMISPHERE FILTERING FUNCTIONS
+#------------------------------------------------------------------------------
+
+def filter_coordinates_by_hemisphere(coords_array, hemisphere='left', verbose=True):
+    """
+    Filter electrode coordinates by hemisphere.
+    
+    Args:
+        coords_array (numpy.ndarray): Array of coordinates in RAS format [N, 3]
+        hemisphere (str): 'left' (x < 0), 'right' (x > 0), or 'both' (no filtering)
+        verbose (bool): Whether to print filtering results
+        
+    Returns:
+        tuple: (filtered_coords, hemisphere_mask, filtered_indices)
+            - filtered_coords: Coordinates in the specified hemisphere
+            - hemisphere_mask: Boolean mask indicating which points are in hemisphere
+            - filtered_indices: Original indices of the filtered points
+    """
+    import numpy as np
+    
+    if hemisphere.lower() == 'both':
+        if verbose:
+            print(f"No hemisphere filtering applied. Keeping all {len(coords_array)} coordinates.")
+        return coords_array, np.ones(len(coords_array), dtype=bool), np.arange(len(coords_array))
+    
+    # Create hemisphere mask based on RAS x-coordinate
+    if hemisphere.lower() == 'left':
+        hemisphere_mask = coords_array[:, 0] < 0  # RAS_x < 0 is left
+        hemisphere_name = "left"
+    elif hemisphere.lower() == 'right':
+        hemisphere_mask = coords_array[:, 0] > 0  # RAS_x > 0 is right
+        hemisphere_name = "right"
+    else:
+        raise ValueError("hemisphere must be 'left', 'right', or 'both'")
+    
+    # Apply filter
+    filtered_coords = coords_array[hemisphere_mask]
+    filtered_indices = np.where(hemisphere_mask)[0]
+    
+    if verbose:
+        original_count = len(coords_array)
+        filtered_count = len(filtered_coords)
+        discarded_count = original_count - filtered_count
+        
+        print(f"Hemisphere filtering results ({hemisphere_name}):")
+        print(f"- Original coordinates: {original_count}")
+        print(f"- Coordinates in {hemisphere_name} hemisphere: {filtered_count}")
+        print(f"- Discarded coordinates: {discarded_count}")
+        print(f"- Filtering efficiency: {filtered_count/original_count*100:.1f}%")
+        
+        if discarded_count > 0:
+            discarded_coords = coords_array[~hemisphere_mask]
+            x_range = f"[{discarded_coords[:, 0].min():.1f}, {discarded_coords[:, 0].max():.1f}]"
+            print(f"- Discarded coordinates x-range: {x_range}")
+    
+    return filtered_coords, hemisphere_mask, filtered_indices
+
+def filter_trajectories_by_hemisphere(trajectories, hemisphere='left', verbose=True):
+    """
+    Filter trajectories by hemisphere based on their center points.
+    
+    Args:
+        trajectories (list): List of trajectory dictionaries
+        hemisphere (str): 'left' (x < 0), 'right' (x > 0), or 'both' (no filtering)
+        verbose (bool): Whether to print filtering results
+        
+    Returns:
+        tuple: (filtered_trajectories, hemisphere_mask)
+    """
+    import numpy as np
+    
+    if not trajectories:
+        return [], np.array([])
+    
+    if hemisphere.lower() == 'both':
+        if verbose:
+            print(f"No hemisphere filtering applied to trajectories. Keeping all {len(trajectories)}.")
+        return trajectories, np.ones(len(trajectories), dtype=bool)
+    
+    hemisphere_mask = []
+    
+    for traj in trajectories:
+        # Use trajectory center for hemisphere determination
+        center = np.array(traj['center'])
+        
+        if hemisphere.lower() == 'left':
+            in_hemisphere = center[0] < 0  # RAS_x < 0 is left
+        elif hemisphere.lower() == 'right':
+            in_hemisphere = center[0] > 0  # RAS_x > 0 is right
+        else:
+            raise ValueError("hemisphere must be 'left', 'right', or 'both'")
+        
+        hemisphere_mask.append(in_hemisphere)
+    
+    hemisphere_mask = np.array(hemisphere_mask)
+    filtered_trajectories = [traj for i, traj in enumerate(trajectories) if hemisphere_mask[i]]
+    
+    if verbose:
+        original_count = len(trajectories)
+        filtered_count = len(filtered_trajectories)
+        hemisphere_name = hemisphere.lower()
+        
+        print(f"Trajectory hemisphere filtering results ({hemisphere_name}):")
+        print(f"- Original trajectories: {original_count}")
+        print(f"- Trajectories in {hemisphere_name} hemisphere: {filtered_count}")
+        print(f"- Discarded trajectories: {original_count - filtered_count}")
+    
+    return filtered_trajectories, hemisphere_mask
+
+def filter_bolt_directions_by_hemisphere(bolt_directions, hemisphere='left', verbose=True):
+    """
+    Filter bolt directions by hemisphere based on their start points.
+    
+    Args:
+        bolt_directions (dict): Dictionary of bolt direction info
+        hemisphere (str): 'left' (x < 0), 'right' (x > 0), or 'both' (no filtering)
+        verbose (bool): Whether to print filtering results
+        
+    Returns:
+        dict: Filtered bolt directions dictionary
+    """
+    import numpy as np
+    
+    if not bolt_directions:
+        return {}
+    
+    if hemisphere.lower() == 'both':
+        if verbose:
+            print(f"No hemisphere filtering applied to bolt directions. Keeping all {len(bolt_directions)}.")
+        return bolt_directions
+    
+    filtered_bolt_directions = {}
+    
+    for bolt_id, bolt_info in bolt_directions.items():
+        start_point = np.array(bolt_info['start_point'])
+        
+        if hemisphere.lower() == 'left':
+            in_hemisphere = start_point[0] < 0  # RAS_x < 0 is left
+        elif hemisphere.lower() == 'right':
+            in_hemisphere = start_point[0] > 0  # RAS_x > 0 is right
+        else:
+            raise ValueError("hemisphere must be 'left', 'right', or 'both'")
+        
+        if in_hemisphere:
+            filtered_bolt_directions[bolt_id] = bolt_info
+    
+    if verbose:
+        original_count = len(bolt_directions)
+        filtered_count = len(filtered_bolt_directions)
+        hemisphere_name = hemisphere.lower()
+        
+        print(f"Bolt directions hemisphere filtering results ({hemisphere_name}):")
+        print(f"- Original bolt directions: {original_count}")
+        print(f"- Bolt directions in {hemisphere_name} hemisphere: {filtered_count}")
+        print(f"- Discarded bolt directions: {original_count - filtered_count}")
+    
+    return filtered_bolt_directions
+
+def apply_hemisphere_filtering_to_results(results, coords_array, hemisphere='left', verbose=True):
+    """
+    Apply hemisphere filtering to all analysis results.
+    
+    Args:
+        results (dict): Results dictionary from trajectory analysis
+        coords_array (numpy.ndarray): Original coordinate array
+        hemisphere (str): 'left', 'right', or 'both'
+        verbose (bool): Whether to print filtering results
+        
+    Returns:
+        tuple: (filtered_results, filtered_coords, hemisphere_info)
+    """
+    import numpy as np
+    import copy
+    
+    if hemisphere.lower() == 'both':
+        if verbose:
+            print("No hemisphere filtering requested.")
+        return results, coords_array, {'hemisphere': 'both', 'filtering_applied': False}
+    
+    print(f"\n=== Applying {hemisphere.upper()} Hemisphere Filtering ===")
+    
+    # Filter coordinates
+    filtered_coords, coord_mask, filtered_indices = filter_coordinates_by_hemisphere(
+        coords_array, hemisphere, verbose
+    )
+    
+    # Create a deep copy of results to avoid modifying original
+    filtered_results = copy.deepcopy(results)
+    
+    # Update coordinate-dependent results
+    if 'dbscan' in filtered_results:
+        # Update noise points coordinates
+        if 'noise_points_coords' in filtered_results['dbscan']:
+            original_noise = np.array(filtered_results['dbscan']['noise_points_coords'])
+            if len(original_noise) > 0:
+                # Filter noise points by hemisphere
+                if hemisphere.lower() == 'left':
+                    noise_mask = original_noise[:, 0] < 0
+                else:  # right
+                    noise_mask = original_noise[:, 0] > 0
+                
+                filtered_noise = original_noise[noise_mask]
+                filtered_results['dbscan']['noise_points_coords'] = filtered_noise.tolist()
+                filtered_results['dbscan']['noise_points'] = len(filtered_noise)
+    
+    # Filter trajectories
+    if 'trajectories' in filtered_results:
+        filtered_trajectories, traj_mask = filter_trajectories_by_hemisphere(
+            filtered_results['trajectories'], hemisphere, verbose
+        )
+        filtered_results['trajectories'] = filtered_trajectories
+        filtered_results['n_trajectories'] = len(filtered_trajectories)
+    
+    # Filter bolt directions if present
+    if 'bolt_directions' in results:
+        filtered_bolt_directions = filter_bolt_directions_by_hemisphere(
+            results['bolt_directions'], hemisphere, verbose
+        )
+        filtered_results['bolt_directions'] = filtered_bolt_directions
+    
+    # Filter combined volume trajectories if present
+    if 'combined_volume' in results and 'trajectories' in results['combined_volume']:
+        original_combined = results['combined_volume']['trajectories']
+        filtered_combined = {}
+        
+        for bolt_id, traj_info in original_combined.items():
+            start_point = np.array(traj_info['start_point'])
+            
+            if hemisphere.lower() == 'left':
+                in_hemisphere = start_point[0] < 0
+            else:  # right
+                in_hemisphere = start_point[0] > 0
+            
+            if in_hemisphere:
+                filtered_combined[bolt_id] = traj_info
+        
+        filtered_results['combined_volume']['trajectories'] = filtered_combined
+        filtered_results['combined_volume']['trajectory_count'] = len(filtered_combined)
+        
+        if verbose:
+            print(f"Combined volume hemisphere filtering:")
+            print(f"- Original combined trajectories: {len(original_combined)}")
+            print(f"- Filtered combined trajectories: {len(filtered_combined)}")
+    
+    # Update electrode validation if present
+    if 'electrode_validation' in filtered_results:
+        # Recalculate validation for filtered trajectories
+        if 'trajectories' in filtered_results:
+            expected_counts = results.get('parameters', {}).get('expected_contact_counts', [5, 8, 10, 12, 15, 18])
+            validation = validate_electrode_clusters(filtered_results, expected_counts)
+            filtered_results['electrode_validation'] = validation
+    
+    # Create hemisphere info
+    hemisphere_info = {
+        'hemisphere': hemisphere,
+        'filtering_applied': True,
+        'original_coords': len(coords_array),
+        'filtered_coords': len(filtered_coords),
+        'filtering_efficiency': len(filtered_coords) / len(coords_array) * 100,
+        'coord_mask': coord_mask,
+        'filtered_indices': filtered_indices
+    }
+    
+    # Add hemisphere info to filtered results
+    filtered_results['hemisphere_filtering'] = hemisphere_info
+    
+    print(f"✅ Hemisphere filtering complete. Results updated for {hemisphere} hemisphere.")
+    
+    return filtered_results, filtered_coords, hemisphere_info
+
+def create_hemisphere_comparison_visualization(coords_array, results, hemisphere_results, hemisphere='left'):
+    """
+    Create a visualization comparing original vs hemisphere-filtered results.
+    
+    Args:
+        coords_array (numpy.ndarray): Original coordinates
+        results (dict): Original analysis results
+        hemisphere_results (dict): Hemisphere-filtered results
+        hemisphere (str): Which hemisphere was filtered
+        
+    Returns:
+        matplotlib.figure.Figure: Comparison visualization
+    """
+    import matplotlib.pyplot as plt
+    from mpl_toolkits.mplot3d import Axes3D
+    import numpy as np
+    
+    fig = plt.figure(figsize=(20, 10))
+    fig.suptitle(f'Hemisphere Filtering Comparison: {hemisphere.upper()} Hemisphere Only', fontsize=16)
+    
+    # Original results (left plot)
+    ax1 = fig.add_subplot(121, projection='3d')
+    
+    # Plot all original coordinates
+    ax1.scatter(coords_array[:, 0], coords_array[:, 1], coords_array[:, 2], 
+               c='lightgray', marker='.', s=10, alpha=0.3)
+    
+    # Highlight hemisphere boundary
+    if hemisphere.lower() == 'left':
+        hemisphere_coords = coords_array[coords_array[:, 0] < 0]
+        other_coords = coords_array[coords_array[:, 0] >= 0]
+        boundary_x = 0
+    else:
+        hemisphere_coords = coords_array[coords_array[:, 0] > 0]
+        other_coords = coords_array[coords_array[:, 0] <= 0]
+        boundary_x = 0
+    
+    # Plot hemisphere coordinates in color
+    ax1.scatter(hemisphere_coords[:, 0], hemisphere_coords[:, 1], hemisphere_coords[:, 2], 
+               c='blue', marker='o', s=20, alpha=0.7, label=f'{hemisphere.title()} hemisphere')
+    
+    # Plot other hemisphere coordinates in gray
+    if len(other_coords) > 0:
+        ax1.scatter(other_coords[:, 0], other_coords[:, 1], other_coords[:, 2], 
+                   c='red', marker='x', s=15, alpha=0.5, label='Other hemisphere (discarded)')
+    
+    # Add hemisphere boundary plane
+    y_range = [coords_array[:, 1].min(), coords_array[:, 1].max()]
+    z_range = [coords_array[:, 2].min(), coords_array[:, 2].max()]
+    Y, Z = np.meshgrid(y_range, z_range)
+    X = np.full_like(Y, boundary_x)
+    ax1.plot_surface(X, Y, Z, alpha=0.2, color='yellow')
+    
+    ax1.set_xlabel('X (mm)')
+    ax1.set_ylabel('Y (mm)')
+    ax1.set_zlabel('Z (mm)')
+    ax1.set_title(f'Original Analysis\n({len(coords_array)} coordinates)')
+    ax1.legend()
+    
+    # Filtered results (right plot)
+    ax2 = fig.add_subplot(122, projection='3d')
+    
+    # Get filtered coordinates and trajectories
+    hemisphere_info = hemisphere_results.get('hemisphere_filtering', {})
+    filtered_coords = coords_array[hemisphere_info.get('coord_mask', np.ones(len(coords_array), dtype=bool))]
+    
+    # Plot filtered coordinates
+    ax2.scatter(filtered_coords[:, 0], filtered_coords[:, 1], filtered_coords[:, 2], 
+               c='blue', marker='o', s=20, alpha=0.7)
+    
+    # Plot filtered trajectories if available
+    if 'trajectories' in hemisphere_results:
+        for i, traj in enumerate(hemisphere_results['trajectories']):
+            endpoints = np.array(traj['endpoints'])
+            color = plt.cm.tab20(i % 20)
+            
+            # Plot trajectory line
+            ax2.plot([endpoints[0][0], endpoints[1][0]],
+                    [endpoints[0][1], endpoints[1][1]],
+                    [endpoints[0][2], endpoints[1][2]],
+                    '-', color=color, linewidth=2, alpha=0.8)
+            
+            # Plot endpoints
+            ax2.scatter(endpoints[:, 0], endpoints[:, 1], endpoints[:, 2],
+                       color=color, marker='*', s=100, alpha=0.9)
+    
+    ax2.set_xlabel('X (mm)')
+    ax2.set_ylabel('Y (mm)')
+    ax2.set_zlabel('Z (mm)')
+    ax2.set_title(f'Filtered Analysis ({hemisphere.title()} Hemisphere)\n'
+                 f'({len(filtered_coords)} coordinates, '
+                 f'{hemisphere_results.get("n_trajectories", 0)} trajectories)')
+    
+    # Add summary statistics
+    original_trajectories = len(results.get('trajectories', []))
+    filtered_trajectories = len(hemisphere_results.get('trajectories', []))
+    
+    stats_text = (
+        f"Filtering Results:\n"
+        f"Coordinates: {len(coords_array)} → {len(filtered_coords)} "
+        f"({hemisphere_info.get('filtering_efficiency', 0):.1f}%)\n"
+        f"Trajectories: {original_trajectories} → {filtered_trajectories}\n"
+        f"Hemisphere: {hemisphere.title()} (x {'< 0' if hemisphere.lower() == 'left' else '> 0'})"
+    )
+    
+    fig.text(0.02, 0.02, stats_text, fontsize=12, 
+            bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
+    
+    plt.tight_layout()
+    return fig
 
 
 #------------------------------------------------------------------------------
@@ -4951,6 +5332,224 @@ def create_bolt_trajectory_validation_page(bolt_directions, trajectories, matche
     
     return fig
 
+def create_pca_angle_analysis_page(results):
+    """
+    Create a visualization page for PCA and angle analysis results.
+    
+    Args:
+        results (dict): Results from integrated_trajectory_analysis
+        
+    Returns:
+        matplotlib.figure.Figure: Figure containing PCA and angle analysis
+    """
+    import matplotlib.pyplot as plt
+    from matplotlib.gridspec import GridSpec
+    import numpy as np
+    
+    fig = plt.figure(figsize=(14, 12))
+    fig.suptitle('PCA and Angular Analysis of Electrode Trajectories', fontsize=16)
+    
+    # Create grid layout
+    gs = GridSpec(3, 2, figure=fig)
+    
+    # Get trajectories
+    trajectories = results.get('trajectories', [])
+    
+    if not trajectories:
+        ax = fig.add_subplot(111)
+        ax.axis('off')
+        ax.text(0.5, 0.5, 'No trajectory data available for analysis', 
+                ha='center', va='center', fontsize=14)
+        return fig
+    
+    # 1. PCA explained variance ratio distribution
+    ax1 = fig.add_subplot(gs[0, 0])
+    
+    explained_variances = []
+    linearity_scores = []
+    
+    for traj in trajectories:
+        if 'pca_variance' in traj and len(traj['pca_variance']) > 0:
+            explained_variances.append(traj['pca_variance'][0])  # First component
+            linearity_scores.append(traj.get('linearity', 0))
+    
+    if explained_variances:
+        ax1.hist(explained_variances, bins=15, alpha=0.7, color='skyblue', edgecolor='black')
+        ax1.axvline(x=np.mean(explained_variances), color='red', linestyle='--', 
+                   label=f'Mean: {np.mean(explained_variances):.3f}')
+        ax1.set_xlabel('PCA First Component Variance Ratio')
+        ax1.set_ylabel('Number of Trajectories')
+        ax1.set_title('Distribution of Trajectory Linearity (PCA)')
+        ax1.legend()
+        ax1.grid(True, alpha=0.3)
+    else:
+        ax1.text(0.5, 0.5, 'No PCA data available', ha='center', va='center')
+    
+    # 2. Linearity vs trajectory length scatter plot
+    ax2 = fig.add_subplot(gs[0, 1])
+    
+    lengths = []
+    for traj in trajectories:
+        if 'length_mm' in traj and 'linearity' in traj:
+            lengths.append(traj['length_mm'])
+    
+    if lengths and linearity_scores:
+        scatter = ax2.scatter(lengths, linearity_scores, alpha=0.7, c='green')
+        ax2.set_xlabel('Trajectory Length (mm)')
+        ax2.set_ylabel('Linearity Score (PCA 1st Component)')
+        ax2.set_title('Trajectory Length vs Linearity')
+        ax2.grid(True, alpha=0.3)
+        
+        # Add correlation coefficient
+        if len(lengths) > 1:
+            correlation = np.corrcoef(lengths, linearity_scores)[0, 1]
+            ax2.text(0.05, 0.95, f'Correlation: {correlation:.3f}', 
+                    transform=ax2.transAxes, bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
+    else:
+        ax2.text(0.5, 0.5, 'Insufficient data for scatter plot', ha='center', va='center')
+    
+    # 3. Angular distribution with respect to coordinate axes
+    ax3 = fig.add_subplot(gs[1, :])
+    
+    angles_x = []
+    angles_y = []
+    angles_z = []
+    
+    for traj in trajectories:
+        if 'angles_with_axes' in traj:
+            angles = traj['angles_with_axes']
+            angles_x.append(angles.get('X', 0))
+            angles_y.append(angles.get('Y', 0))
+            angles_z.append(angles.get('Z', 0))
+    
+    if angles_x:
+        bins = np.linspace(0, 180, 19)  # 10-degree bins
+        
+        ax3.hist(angles_x, bins=bins, alpha=0.7, label='X-axis angles', color='red')
+        ax3.hist(angles_y, bins=bins, alpha=0.7, label='Y-axis angles', color='green')
+        ax3.hist(angles_z, bins=bins, alpha=0.7, label='Z-axis angles', color='blue')
+        
+        ax3.set_xlabel('Angle with Coordinate Axis (degrees)')
+        ax3.set_ylabel('Number of Trajectories')
+        ax3.set_title('Distribution of Trajectory Angles with Coordinate Axes')
+        ax3.legend()
+        ax3.grid(True, alpha=0.3)
+        
+        # Add vertical lines for common angles
+        for angle in [0, 30, 45, 60, 90]:
+            ax3.axvline(x=angle, color='gray', linestyle=':', alpha=0.5)
+            ax3.text(angle, ax3.get_ylim()[1] * 0.9, f'{angle}°', 
+                    ha='center', fontsize=8, color='gray')
+    else:
+        ax3.text(0.5, 0.5, 'No angle data available', ha='center', va='center')
+    
+    # 4. Summary statistics table
+    ax4 = fig.add_subplot(gs[2, 0])
+    ax4.axis('off')
+    
+    # Calculate summary statistics
+    if trajectories:
+        mean_linearity = np.mean(linearity_scores) if linearity_scores else 0
+        std_linearity = np.std(linearity_scores) if linearity_scores else 0
+        mean_length = np.mean(lengths) if lengths else 0
+        std_length = np.std(lengths) if lengths else 0
+        
+        # Count highly linear trajectories (linearity > 0.9)
+        high_linearity = sum(1 for score in linearity_scores if score > 0.9) if linearity_scores else 0
+        
+        summary_data = [
+            ['Number of Trajectories', str(len(trajectories))],
+            ['Mean Linearity', f'{mean_linearity:.3f} ± {std_linearity:.3f}'],
+            ['Mean Length (mm)', f'{mean_length:.1f} ± {std_length:.1f}'],
+            ['Highly Linear (>0.9)', f'{high_linearity} ({high_linearity/len(trajectories)*100:.1f}%)'],
+            ['Min Linearity', f'{min(linearity_scores):.3f}' if linearity_scores else 'N/A'],
+            ['Max Linearity', f'{max(linearity_scores):.3f}' if linearity_scores else 'N/A']
+        ]
+        
+        table = ax4.table(cellText=summary_data, colLabels=['Metric', 'Value'],
+                         loc='center', cellLoc='left')
+        table.auto_set_font_size(False)
+        table.set_fontsize(10)
+        table.scale(1, 1.5)
+        
+        # Color code linearity values
+        for i, (metric, value) in enumerate(summary_data):
+            if 'Linearity' in metric and value != 'N/A':
+                try:
+                    val = float(value.split()[0])
+                    if val > 0.9:
+                        table[(i+1, 1)].set_facecolor('lightgreen')
+                    elif val < 0.7:
+                        table[(i+1, 1)].set_facecolor('lightcoral')
+                except:
+                    pass
+    
+    ax4.set_title('PCA Analysis Summary')
+    
+    # 5. Trajectory quality assessment
+    ax5 = fig.add_subplot(gs[2, 1])
+    
+    # Create a quality score based on linearity and other factors
+    quality_scores = []
+    quality_labels = []
+    
+    for traj in trajectories:
+        linearity = traj.get('linearity', 0)
+        length = traj.get('length_mm', 0)
+        contact_count = traj.get('electrode_count', 0)
+        
+        # Simple quality score: high linearity, reasonable length, good contact count
+        quality_score = linearity
+        
+        # Penalize very short or very long trajectories
+        if length < 20 or length > 100:
+            quality_score *= 0.8
+        
+        # Boost score for standard electrode sizes
+        standard_sizes = [5, 8, 10, 12, 15, 18]
+        if contact_count in standard_sizes:
+            quality_score *= 1.1
+        
+        quality_scores.append(quality_score)
+        
+        # Classify quality
+        if quality_score > 0.9:
+            quality_labels.append('Excellent')
+        elif quality_score > 0.8:
+            quality_labels.append('Good')
+        elif quality_score > 0.7:
+            quality_labels.append('Fair')
+        else:
+            quality_labels.append('Poor')
+    
+    if quality_labels:
+        # Count each quality level
+        quality_counts = {label: quality_labels.count(label) for label in ['Excellent', 'Good', 'Fair', 'Poor']}
+        
+        # Create pie chart
+        labels = []
+        sizes = []
+        colors = []
+        color_map = {'Excellent': 'green', 'Good': 'lightgreen', 'Fair': 'orange', 'Poor': 'red'}
+        
+        for label, count in quality_counts.items():
+            if count > 0:
+                labels.append(f'{label}\n({count})')
+                sizes.append(count)
+                colors.append(color_map[label])
+        
+        if sizes:
+            ax5.pie(sizes, labels=labels, colors=colors, autopct='%1.1f%%', startangle=90)
+            ax5.set_title('Trajectory Quality Assessment')
+        else:
+            ax5.text(0.5, 0.5, 'No quality data available', ha='center', va='center')
+    else:
+        ax5.text(0.5, 0.5, 'No trajectories for quality assessment', ha='center', va='center')
+    
+    plt.tight_layout()
+    return fig
+
+
 def visualize_combined_results(coords_array, results, output_dir=None, bolt_directions=None):
     """
     Create and save/display visualizations of trajectory analysis results.
@@ -5202,14 +5801,14 @@ def main(use_combined_volume=True, use_original_reports=True, detect_duplicates=
          duplicate_threshold=0.5, use_adaptive_clustering=False, max_iterations=10,
          validate_spacing=True, expected_spacing_range=(3.0, 5.0),
          refine_trajectories=True, max_contacts_per_trajectory=20,
-         validate_entry_angles=True):  # New parameter
+         validate_entry_angles=True, hemisphere='both'):  # NEW PARAMETER
     """
-    Enhanced main function for electrode trajectory analysis with flexible options
+    Enhanced main function for electrode trajectory analysis with hemisphere filtering and flexible options
     including adaptive clustering, spacing validation, and trajectory refinement.
     
     This function provides a unified workflow for both combined volume and traditional
     analysis approaches, with options to generate various reports and use adaptive
-    parameter selection for clustering.
+    parameter selection for clustering. Now includes hemisphere-based filtering.
     
     Args:
         use_combined_volume (bool): Whether to use the combined volume approach for trajectory extraction
@@ -5223,6 +5822,7 @@ def main(use_combined_volume=True, use_original_reports=True, detect_duplicates=
         refine_trajectories (bool): Whether to apply trajectory refinement (merging/splitting)
         max_contacts_per_trajectory (int): Maximum number of contacts allowed in a single trajectory
         validate_entry_angles (bool): Whether to validate entry angles against surgical constraints (30-60°)
+        hemisphere (str): 'left' (x < 0), 'right' (x > 0), or 'both' (no filtering) - NEW PARAMETER
         
     Returns:
         dict: Results dictionary containing all analysis results
@@ -5233,16 +5833,23 @@ def main(use_combined_volume=True, use_original_reports=True, detect_duplicates=
         print(f"Options: combined_volume={use_combined_volume}, adaptive_clustering={use_adaptive_clustering}, "
               f"detect_duplicates={detect_duplicates}, duplicate_threshold={duplicate_threshold}, "
               f"validate_spacing={validate_spacing}, spacing_range={expected_spacing_range}, "
-              f"refine_trajectories={refine_trajectories}, validate_entry_angles={validate_entry_angles}")
+              f"refine_trajectories={refine_trajectories}, validate_entry_angles={validate_entry_angles}, "
+              f"hemisphere={hemisphere}")  # NEW: Show hemisphere setting
         
         # Step 1: Load required volumes from Slicer
         print("Loading volumes from Slicer...")
-        electrodes_volume = slicer.util.getNode('P2_electrode_mask_success')
+        electrodes_volume = slicer.util.getNode('P2_electrode_mask_success_1')
         brain_volume = slicer.util.getNode("patient2_mask_5")
         
         # Create output directories
-        base_dir = r"C:\Users\rocia\Downloads\TFG\Cohort\Centroids\P2_BoltHeadandpaths_contactsXpath_SPACING_dealing_with_problems_test"
-        output_dir = os.path.join(base_dir, "trajectory_analysis_results")
+        base_dir = r"C:\Users\rocia\Downloads\TFG\Cohort\Centroids\P2_BoltHeadandpaths_contactsXpath_SPACING_dealing_with_problems_test_fiducials"
+        
+        # NEW: Include hemisphere in output directory name
+        output_dir_name = "trajectory_analysis_results"
+        if hemisphere.lower() != 'both':
+            output_dir_name += f"_{hemisphere}_hemisphere"
+        
+        output_dir = os.path.join(base_dir, output_dir_name)
         os.makedirs(output_dir, exist_ok=True)
         
         # Create adaptive clustering subdirectory if needed
@@ -5271,21 +5878,40 @@ def main(use_combined_volume=True, use_original_reports=True, detect_duplicates=
                 'expected_spacing_range': expected_spacing_range,
                 'refine_trajectories': refine_trajectories,
                 'max_contacts_per_trajectory': max_contacts_per_trajectory,
-                'validate_entry_angles': validate_entry_angles
+                'validate_entry_angles': validate_entry_angles,
+                'hemisphere': hemisphere  # NEW: Store hemisphere parameter
             }
         }
         
         # Step 2: Get electrode coordinates
         print("Extracting electrode coordinates...")
         centroids_ras = get_all_centroids(electrodes_volume) if electrodes_volume else None
-        coords_array = np.array(list(centroids_ras.values())) if centroids_ras else None
+        original_coords_array = np.array(list(centroids_ras.values())) if centroids_ras else None
         
-        if coords_array is None or len(coords_array) == 0:
+        if original_coords_array is None or len(original_coords_array) == 0:
             print("No electrode coordinates found. Cannot proceed with analysis.")
             return {}
         
-        print(f"Found {len(coords_array)} electrode coordinates.")
+        print(f"Found {len(original_coords_array)} electrode coordinates.")
+        
+        # NEW: Apply hemisphere filtering to coordinates
+        coords_array, hemisphere_mask, filtered_indices = filter_coordinates_by_hemisphere(
+            original_coords_array, hemisphere, verbose=True
+        )
+        
+        if len(coords_array) == 0:
+            print(f"No coordinates found in {hemisphere} hemisphere. Cannot proceed with analysis.")
+            return {'error': f'No coordinates in {hemisphere} hemisphere'}
+        
         all_results['electrode_count'] = len(coords_array)
+        all_results['original_electrode_count'] = len(original_coords_array)  # NEW: Store original count
+        all_results['hemisphere_filtering'] = {  # NEW: Store filtering info
+            'hemisphere': hemisphere,
+            'original_count': len(original_coords_array),
+            'filtered_count': len(coords_array),
+            'filtering_efficiency': len(coords_array) / len(original_coords_array) * 100,
+            'discarded_count': len(original_coords_array) - len(coords_array)
+        }
         
         # Step 3: Combined volume analysis (if requested)
         combined_trajectories = {}
@@ -5295,17 +5921,23 @@ def main(use_combined_volume=True, use_original_reports=True, detect_duplicates=
             
             if combined_volume:
                 # Extract trajectories from combined volume
-                combined_trajectories = extract_trajectories_from_combined_mask(
+                all_combined_trajectories = extract_trajectories_from_combined_mask(
                     combined_volume,
                     brain_volume=brain_volume
                 )
                 
+                # NEW: Filter combined trajectories by hemisphere
+                combined_trajectories = filter_bolt_directions_by_hemisphere(
+                    all_combined_trajectories, hemisphere, verbose=True
+                )
+                
                 all_results['combined_volume'] = {
                     'trajectories': combined_trajectories,
-                    'trajectory_count': len(combined_trajectories)
+                    'trajectory_count': len(combined_trajectories),
+                    'original_trajectory_count': len(all_combined_trajectories)  # NEW: Store original count
                 }
                 
-                print(f"Extracted {len(combined_trajectories)} trajectories from combined volume.")
+                print(f"Extracted {len(combined_trajectories)} trajectories from combined volume (after hemisphere filtering).")
                 
                 # Create trajectory lines volume
                 if combined_trajectories:
@@ -5329,14 +5961,20 @@ def main(use_combined_volume=True, use_original_reports=True, detect_duplicates=
             else:
                 print("Combined volume not found. Skipping combined volume analysis.")
         
-        # Step 4: Get entry points if available
+        # Step 4: Get entry points if available and filter by hemisphere
         entry_points = None
         entry_points_volume = slicer.util.getNode('P2_brain_entry_points')
         if entry_points_volume:
-            entry_centroids_ras = get_all_centroids(entry_points_volume)
-            if entry_centroids_ras:
-                entry_points = np.array(list(entry_centroids_ras.values()))
-                print(f"Found {len(entry_points)} entry points.")
+            all_entry_centroids_ras = get_all_centroids(entry_points_volume)
+            if all_entry_centroids_ras:
+                all_entry_points = np.array(list(all_entry_centroids_ras.values()))
+                
+                # NEW: Filter entry points by hemisphere
+                entry_points, entry_hemisphere_mask, _ = filter_coordinates_by_hemisphere(
+                    all_entry_points, hemisphere, verbose=True
+                )
+                
+                print(f"Found {len(entry_points)} entry points in {hemisphere} hemisphere (original: {len(all_entry_points)}).")
         
         # Step 5: Perform trajectory analysis with regular or adaptive approach
         if use_adaptive_clustering:
@@ -5562,7 +6200,7 @@ def main(use_combined_volume=True, use_original_reports=True, detect_duplicates=
                     create_duplicate_analysis_report(duplicate_analyses, output_dir)
                     print(f"✅ Duplicate centroid analysis report saved to {os.path.join(output_dir, 'duplicate_centroid_analysis.pdf')}")
         
-        # Step 8: Get bolt directions
+        # Step 8: Get bolt directions and filter by hemisphere
         bolt_directions = None
         bolt_head_volume = slicer.util.getNode('P2_bolt_heads')
         
@@ -5606,6 +6244,13 @@ def main(use_combined_volume=True, use_original_reports=True, detect_duplicates=
                         'points': points,
                         'method': 'combined_volume'
                     }
+                
+                # NEW: Apply hemisphere filtering to bolt directions
+                # (This is already done above when filtering combined_trajectories, 
+                # but we ensure consistency here)
+                bolt_directions = filter_bolt_directions_by_hemisphere(
+                    bolt_directions, hemisphere, verbose=False  # Already printed above
+                )
             
             print(f"Found {len(bolt_directions) if bolt_directions else 0} bolt-to-entry directions.")
             all_results['bolt_directions'] = bolt_directions
@@ -5679,6 +6324,26 @@ def main(use_combined_volume=True, use_original_reports=True, detect_duplicates=
                 integrated_results['figures'] = {}
             integrated_results['figures']['spacing_validation'] = spacing_fig
             integrated_results['figures']['spacing_validation_3d'] = spacing_3d_fig
+        
+        # NEW: Generate hemisphere comparison visualization if reports are enabled and hemisphere filtering was applied
+        if use_original_reports and hemisphere.lower() != 'both':
+            print("Generating hemisphere comparison visualization...")
+            
+            # Create a mock "original" results for comparison
+            original_results_mock = {
+                'trajectories': [],  # Would need original trajectories for full comparison
+                'n_trajectories': len(original_coords_array)  # Simplified for demo
+            }
+            
+            hemisphere_comparison_fig = create_hemisphere_comparison_visualization(
+                original_coords_array, original_results_mock, integrated_results, hemisphere
+            )
+            
+            with PdfPages(os.path.join(output_dir, f'hemisphere_filtering_{hemisphere}.pdf')) as pdf:
+                pdf.savefig(hemisphere_comparison_fig)
+                plt.close(hemisphere_comparison_fig)
+            
+            print(f"✅ Hemisphere comparison report saved to {os.path.join(output_dir, f'hemisphere_filtering_{hemisphere}.pdf')}")
         
         # Step 10: Generate other reports
         if use_original_reports:
@@ -5781,6 +6446,13 @@ def main(use_combined_volume=True, use_original_reports=True, detect_duplicates=
         all_results['execution_time'] = execution_time
         
         print(f"\nAnalysis Summary:")
+        # NEW: Show hemisphere filtering results
+        if hemisphere.lower() != 'both':
+            hemisphere_info = all_results['hemisphere_filtering']
+            print(f"- Hemisphere filtering ({hemisphere}): {hemisphere_info['filtered_count']} of {hemisphere_info['original_count']} "
+                  f"coordinates ({hemisphere_info['filtering_efficiency']:.1f}%)")
+            print(f"- Discarded coordinates: {hemisphere_info['discarded_count']}")
+        
         print(f"- Analyzed {len(coords_array)} electrode coordinates")
         print(f"- Combined volume trajectories: {len(combined_trajectories) if combined_trajectories else 0}")
         print(f"- Integrated analysis trajectories: {integrated_results.get('n_trajectories', 0)}")
@@ -5857,9 +6529,75 @@ if __name__ == "__main__":
         expected_spacing_range=(3.0, 5.0),   # Set expected spacing range (3-5mm)
         refine_trajectories=True,            # Enable trajectory refinement (merging/splitting)
         max_contacts_per_trajectory=18,      # Maximum contacts allowed in a single trajectory
-        validate_entry_angles=True           # Enable entry angle validation (30-60°)
+        validate_entry_angles=True,          # Enable entry angle validation (30-60°)
+        hemisphere='left'                    # NEW: Set hemisphere ('left', 'right', or 'both')
     )
     print("Analysis completed.")
+
+# Additional convenience functions for hemisphere-specific analysis
+def analyze_left_hemisphere():
+    """Convenience function to analyze only left hemisphere electrodes."""
+    return main(hemisphere='left')
+
+def analyze_right_hemisphere():
+    """Convenience function to analyze only right hemisphere electrodes.""" 
+    return main(hemisphere='right')
+
+def analyze_both_hemispheres():
+    """Convenience function to analyze all electrodes (no hemisphere filtering)."""
+    return main(hemisphere='both')
+
+def compare_hemispheres():
+    """
+    Compare analysis results between left and right hemispheres.
+    
+    Returns:
+        dict: Comparison results between hemispheres
+    """
+    print("Running hemisphere comparison analysis...")
+    
+    # Analyze left hemisphere
+    print("\n" + "="*50)
+    print("ANALYZING LEFT HEMISPHERE")
+    print("="*50)
+    left_results = main(hemisphere='left', use_original_reports=False)
+    
+    # Analyze right hemisphere  
+    print("\n" + "="*50)
+    print("ANALYZING RIGHT HEMISPHERE")
+    print("="*50)
+    right_results = main(hemisphere='right', use_original_reports=False)
+    
+    # Create comparison
+    comparison = {
+        'left_hemisphere': left_results,
+        'right_hemisphere': right_results,
+        'comparison_summary': {
+            'left_electrodes': left_results.get('electrode_count', 0),
+            'right_electrodes': right_results.get('electrode_count', 0),
+            'left_trajectories': left_results.get('integrated_analysis', {}).get('n_trajectories', 0),
+            'right_trajectories': right_results.get('integrated_analysis', {}).get('n_trajectories', 0),
+            'total_electrodes': left_results.get('electrode_count', 0) + right_results.get('electrode_count', 0),
+            'total_trajectories': (left_results.get('integrated_analysis', {}).get('n_trajectories', 0) + 
+                                 right_results.get('integrated_analysis', {}).get('n_trajectories', 0))
+        }
+    }
+    
+    # Print comparison summary
+    print("\n" + "="*50)
+    print("HEMISPHERE COMPARISON SUMMARY")
+    print("="*50)
+    summary = comparison['comparison_summary']
+    print(f"Left hemisphere: {summary['left_electrodes']} electrodes, {summary['left_trajectories']} trajectories")
+    print(f"Right hemisphere: {summary['right_electrodes']} electrodes, {summary['right_trajectories']} trajectories")
+    print(f"Total: {summary['total_electrodes']} electrodes, {summary['total_trajectories']} trajectories")
+    
+    if summary['total_electrodes'] > 0:
+        left_percentage = (summary['left_electrodes'] / summary['total_electrodes']) * 100
+        right_percentage = (summary['right_electrodes'] / summary['total_electrodes']) * 100
+        print(f"Distribution: {left_percentage:.1f}% left, {right_percentage:.1f}% right")
+    
+    return comparison
 
 #------------------------------------------------------------------------------
 #exec(open(r'C:\Users\rocia\AppData\Local\slicer.org\Slicer 5.6.2\SEEG_module\SEEG_masking\Electrode_path\orga.py').read())

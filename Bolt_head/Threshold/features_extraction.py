@@ -7,16 +7,6 @@ from scipy.stats import kurtosis, skew
 # --- CONFIGURATION ---
 CT = slicer.util.getNode('P3_CTp.3D')
 
-# CT_AUGMENTED = {
-#      "P3_CTp.3D_aug_0_intensity_scaling_intensity_shift": 2190,
-#      "P3_CTp.3D_aug_1_gaussian_blur_gaussian_noise_intensity_shift": 1198,
-#      "P3_CTp.3D_aug_9_gaussian_noise": 2660,
-#      "P3_CTp.3D_aug_7_intensity_shift_intensity_scaling_rotation": 2420,
-#      "P3_CTp.3D_aug_8_gaussian_noise_rotation_intensity_scaling": 2430,
-#      "P3_CTp.3D_aug_9_intensity_scaling_intensity_shift": 2800,
-
-#  }
-
 fix_threshold_ranges_CT = [2400]
 
 output_dir_CT = r"C:\Users\rocia\Downloads\TFG\Cohort\Models\Image_bolt_head_model"
