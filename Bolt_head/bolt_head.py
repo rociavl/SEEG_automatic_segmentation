@@ -1201,8 +1201,6 @@ class BoltHeadDetector:
         plt.savefig(os.path.join(output_dir, "consensus_regions.png"), dpi=300)
         plt.close(fig)
 
-
-
 def main():
     detector = BoltHeadDetector(CONFIG)
     detector.run()
