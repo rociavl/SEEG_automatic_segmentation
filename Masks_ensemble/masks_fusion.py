@@ -817,7 +817,7 @@ def main():
     """
     # Paths - update these to your actual paths
     mask_folder_path = r"C:\Users\rocia\Downloads\P6_ELECTRODES_MASK"
-    output_dir = r"C:\Users\rocia\Downloads\TFG\Cohort\Enhance_ctp_tests\P6_weighted_fusion_fix_enhanced_plots"
+    output_dir = r"C:\Users\rocia\Downloads\TFG\Cohort\Enhance_ctp_tests\P6_weighted_fusion_fix_enhanced_plots_for_validation"
     
     # Initialize the enhanced mask selector
     selector = EnhancedMaskSelector(mask_folder_path, output_dir)

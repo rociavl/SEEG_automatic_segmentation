@@ -32,7 +32,7 @@ CONFIG = {
     'max_region_size': 800,
     'morph_kernel_size': 1,
     'principal_axis_length': 15,
-    'output_dir': r"C:\Users\rocia\Downloads\TFG\Cohort\Bolt_heads\P2_entry_adaptive_pdf_features_lines"
+    'output_dir': r"C:\Users\rocia\Downloads\TFG\Cohort\Bolt_heads\P2_entry_adaptive_pdf_features_lines_complete_algorithm"
 }
 
 class VolumeHelper:
@@ -222,9 +222,10 @@ class BoltHeadDetector:
         }
 
     def _apply_adaptive_threshold_algorithm(self, features):
-        """Apply proven adaptive threshold algorithm."""
+        """Apply complete adaptive threshold algorithm from LaTeX document."""
         
         # Extract key features
+        P_99_95 = features['percentile_99.95']  # ← NOW USING P99.95!
         P_99_97 = features['percentile_99.97']
         P_99_98 = features['percentile_99.98']
         ratio = features['ratio_above_2400']
@@ -233,24 +234,50 @@ class BoltHeadDetector:
         threshold = 2400  # Start with baseline
         decision_reason = "Standard case - baseline threshold"
         
-        # Apply your proven decision rules
-        if ratio > 0.002 and gradient < -35:
+        # SPECIAL CASE 1: High ratio + steep gradient (P7-like)
+        if ratio > 0.002 and gradient < -30:  # ← Changed from -35 to -30 per LaTeX
             threshold = 2815
             decision_reason = f"P7-like: High electrode density (ratio={ratio:.6f}) + steep gradient ({gradient:.2f})"
-            
+        
+        # SPECIAL CASE 2: Very low ratio (P6-like)
         elif ratio < 0.0003:
             threshold = 2325
             decision_reason = f"P6-like: Very low electrode density (ratio={ratio:.6f})"
-            
-        elif P_99_97 == P_99_98 == 3071:
-            threshold = 2415
-            decision_reason = f"P4-like: Scanner saturation (99.97%={P_99_97}, 99.98%={P_99_98})"
-            
-        else:
-            threshold = 2400
-            decision_reason = f"Standard case (ratio={ratio:.6f}, 99.97%={P_99_97:.1f} HU)"
         
-        return threshold, decision_reason
+        # SPECIAL CASE 3: Scanner saturation (P4-like) - IMPROVED DETECTION
+        elif P_99_97 == P_99_98 and P_99_97 > 3060:  # ← More flexible than hardcoded 3071
+            # Use midpoint between 99.8% and 99.9% percentiles for saturation case
+            P_99_8 = features.get('percentile_99.8', P_99_97)
+            P_99_9 = features.get('percentile_99.9', P_99_97)
+            threshold = int((P_99_8 + P_99_9) / 2)
+            decision_reason = f"P4-like: Scanner saturation (99.97%={P_99_97}, 99.98%={P_99_98})"
+        
+        # GENERAL ALGORITHM - THE MISSING PIECE!
+        else:
+            # Determine base threshold using P99.95 percentile
+            if ratio < 0.0005:
+                # Low ratio case: threshold above P99.95
+                base_threshold = min(2400, P_99_95 + 200)
+                decision_reason = f"Low ratio case: P99.95 + 200 = {P_99_95:.1f} + 200"
+            else:
+                # Higher ratio case: threshold below P99.95
+                distance = min(300, ratio * 100000)
+                base_threshold = min(2400, P_99_95 - distance)
+                decision_reason = f"Higher ratio case: P99.95 - {distance:.0f} = {P_99_95:.1f} - {distance:.0f}"
+            
+            threshold = base_threshold
+            
+            # CRITICAL: Never exceed 99.97 percentile (universal upper bound)
+            upper_limit = P_99_97 - 100
+            if threshold > upper_limit:
+                threshold = int(upper_limit)
+                decision_reason += f" → capped at P99.97-100 = {upper_limit:.0f}"
+        
+        # SAFETY BOUNDS - THE FINAL MISSING PIECE!
+        threshold = max(2325, min(2815, threshold))
+        
+        return int(threshold), decision_reason
+    
     def _validate_bolt_heads(self, region_info, brain_mask_array, volume_node):
         """Validate bolt heads based on brain context."""
         spacing = volume_node.GetSpacing()
