@@ -32,7 +32,7 @@ CONFIG = {
     'max_region_size': 800,
     'morph_kernel_size': 1,
     'principal_axis_length': 15,
-    'output_dir': r"C:\Users\rocia\Downloads\TFG\Cohort\Bolt_heads\P2_entry_adaptive_pdf_features_lines_complete_algorithm"
+    'output_dir': r"C:\Users\rocia\Downloads\TFG\Cohort\Bolt_heads\P4_entry_adaptive_pdf_features_lines_complete_algorithm"
 }
 
 class VolumeHelper:
@@ -121,8 +121,8 @@ class BoltHeadDetector:
     def _load_nodes(self):
         """Load required nodes from Slicer."""
         return (
-            slicer.util.getNode('P2_CTp.3D'),  # CT volume
-            slicer.util.getNode('patient2_mask_5')  # Brain mask
+            slicer.util.getNode('P4_CTp.3D'),  # CT volume
+            slicer.util.getNode('patient4_mask_5')  # Brain mask
         )
         
     def _get_direction_matrix(self, volume_node):
@@ -235,7 +235,7 @@ class BoltHeadDetector:
         decision_reason = "Standard case - baseline threshold"
         
         # SPECIAL CASE 1: High ratio + steep gradient (P7-like)
-        if ratio > 0.002 and gradient < -30:  # ← Changed from -35 to -30 per LaTeX
+        if ratio > 0.002 and gradient < -30:  # ← Changed from -35 to -30 
             threshold = 2815
             decision_reason = f"P7-like: High electrode density (ratio={ratio:.6f}) + steep gradient ({gradient:.2f})"
         
