@@ -33,6 +33,8 @@ from matplotlib.backends.backend_pdf import PdfPages
 from matplotlib.gridspec import GridSpec
 import pandas as pd
 import time
+import plotly.graph_objects as go
+import plotly.express as px
 
 # Import utility functions from external modules
 from Outermost_centroids_coordinates.outermost_centroids_vol_slicer import (
@@ -6280,9 +6282,15 @@ def extract_trajectory_features(trajectory, cluster_coords):
 
 
 
-def create_final_trajectory_report(coords_array, results, output_dir):
+def create_final_trajectory_report(coords_array, results, output_dir, create_interactive=True):
     """
     Create final report with scoring table and 3D visualization
+    
+    Args:
+        coords_array: Array of electrode coordinates
+        results: Analysis results
+        output_dir: Output directory
+        create_interactive: Whether to create interactive Plotly visualization
     """
     
     # Calculate scores
@@ -6295,20 +6303,205 @@ def create_final_trajectory_report(coords_array, results, output_dir):
     print(f"✅ Trajectory scores saved to: {csv_path}")
     
     # Create 3D visualization with IDs and scores
-    fig = create_scored_3d_visualization(coords_array, results, scores_df)
+    static_fig = create_scored_3d_visualization(coords_array, results, scores_df)
     
-    # Save visualization
-    viz_path = os.path.join(output_dir, 'trajectory_scores_3d_visualization.png')
-    fig.savefig(viz_path, dpi=300, bbox_inches='tight')
+    # Save static visualization
+    static_viz_path = os.path.join(output_dir, 'trajectory_scores_3d_visualization.png')
+    static_fig.savefig(static_viz_path, dpi=300, bbox_inches='tight')
+    plt.close(static_fig)
     
-    # Create interactive HTML report
+    # Create interactive visualization if requested
+    interactive_viz_path = None
+    if create_interactive:
+        try:
+            import plotly.graph_objects as go
+            import plotly.express as px
+            
+            # Create interactive 3D plot
+            interactive_fig = create_interactive_scored_3d_visualization(coords_array, results, scores_df)
+            
+            if interactive_fig is not None:
+                interactive_viz_path = os.path.join(output_dir, 'trajectory_scores_3d_interactive.html')
+                interactive_fig.write_html(interactive_viz_path)
+                print(f"✅ Interactive 3D visualization saved to: {interactive_viz_path}")
+            
+        except ImportError:
+            print("⚠️ Plotly not available. Creating static visualization only.")
+            create_interactive = False
+        except Exception as e:
+            print(f"⚠️ Error creating interactive visualization: {e}")
+            create_interactive = False
+    
+    # Create interactive HTML report with user choice
     html_path = os.path.join(output_dir, 'trajectory_annotation_report.html')
-    create_interactive_annotation_report(scores_df, viz_path, html_path)
+    create_interactive_annotation_report(
+        scores_df, 
+        static_viz_path, 
+        html_path,
+        interactive_viz_path if create_interactive else None
+    )
     
-    print(f"✅ 3D visualization saved to: {viz_path}")
+    print(f"✅ Static 3D visualization saved to: {static_viz_path}")
     print(f"✅ Interactive report saved to: {html_path}")
     
-    return scores_df, fig
+    return scores_df, static_fig
+
+
+##### interactive visualization
+def create_interactive_scored_3d_visualization(coords_array, results, scores_df):
+    """
+    Create interactive 3D Plotly plot with trajectory IDs and algorithm scores
+    """
+    try:
+        import plotly.graph_objects as go
+        import numpy as np
+        
+        # Get cluster data
+        clusters = np.array([node[1]['dbscan_cluster'] for node in results['graph'].nodes(data=True)])
+        
+        # Create the main 3D plot
+        fig = go.Figure()
+        
+        # Plot all points as background
+        fig.add_trace(go.Scatter3d(
+            x=coords_array[:, 0],
+            y=coords_array[:, 1], 
+            z=coords_array[:, 2],
+            mode='markers',
+            marker=dict(
+                size=2,
+                color='lightgray',
+                opacity=0.3
+            ),
+            name='All Electrodes',
+            hovertemplate='<b>Electrode</b><br>' +
+                          'X: %{x:.1f} mm<br>' +
+                          'Y: %{y:.1f} mm<br>' +
+                          'Z: %{z:.1f} mm<extra></extra>'
+        ))
+        
+        # Create color map based on algorithm scores
+        scores_dict = dict(zip(scores_df['trajectory_id'], scores_df['algorithm_score']))
+        
+        # Plot each trajectory with color coding
+        for _, row in scores_df.iterrows():
+            traj_id = row['trajectory_id']
+            score = row['algorithm_score']
+            
+            # Get coordinates for this trajectory
+            mask = clusters == traj_id
+            if not np.any(mask):
+                continue
+                
+            cluster_coords = coords_array[mask]
+            
+            # Color based on score: red (bad) -> yellow (ok) -> green (good)
+            if score >= 80:
+                color = 'green'
+                marker_symbol = 'circle'
+                size = 8
+                quality = 'Good'
+            elif score >= 60:
+                color = 'orange' 
+                marker_symbol = 'square'
+                size = 7
+                quality = 'OK'
+            else:
+                color = 'red'
+                marker_symbol = 'diamond'
+                size = 9
+                quality = 'Bad'
+            
+            # Create hover text for trajectory
+            hover_text = []
+            for i, coord in enumerate(cluster_coords):
+                hover_text.append(
+                    f"<b>Trajectory {traj_id}</b><br>" +
+                    f"Contact {i+1}/{len(cluster_coords)}<br>" +
+                    f"Position: ({coord[0]:.1f}, {coord[1]:.1f}, {coord[2]:.1f}) mm<br>" +
+                    f"Algorithm Score: {score:.0f}<br>" +
+                    f"Quality: {quality}<br>" +
+                    f"Expected Contacts: {row.get('closest_expected_count', 'N/A')}<br>" +
+                    f"Actual Contacts: {row.get('n_contacts', len(cluster_coords))}<br>" +
+                    f"Linearity: {row.get('linearity_pca', 0):.3f}<br>" +
+                    f"Length: {row.get('length_mm', 0):.1f} mm"
+                )
+            
+            # Plot trajectory points
+            fig.add_trace(go.Scatter3d(
+                x=cluster_coords[:, 0],
+                y=cluster_coords[:, 1],
+                z=cluster_coords[:, 2],
+                mode='markers+lines',
+                line=dict(
+                    color=color,
+                    width=6 if quality == 'Bad' else 4
+                ),
+                marker=dict(
+                    size=size,
+                    color=color,
+                    symbol=marker_symbol,
+                    line=dict(width=2, color='black')
+                ),
+                name=f'T{traj_id} - {quality} ({score:.0f})',
+                hovertemplate='%{text}<extra></extra>',
+                text=hover_text,
+                legendgroup=quality,
+                showlegend=True
+            ))
+        
+        # Update layout for better visualization
+        fig.update_layout(
+            title={
+                'text': 'Interactive 3D Trajectory Quality Scores<br>' +
+                        '<sub>Green=Good (≥80), Orange=OK (60-79), Red=Bad (<60)</sub>',
+                'x': 0.5,
+                'font': {'size': 16}
+            },
+            scene=dict(
+                xaxis_title='X (mm)',
+                yaxis_title='Y (mm)',
+                zaxis_title='Z (mm)',
+                camera=dict(
+                    eye=dict(x=1.5, y=1.5, z=1.5)
+                ),
+                aspectmode='cube'
+            ),
+            width=1000,
+            height=700,
+            hovermode='closest'
+        )
+        
+        # Add summary annotation
+        good_count = len(scores_df[scores_df['algorithm_score'] >= 80])
+        ok_count = len(scores_df[(scores_df['algorithm_score'] >= 60) & (scores_df['algorithm_score'] < 80)])
+        bad_count = len(scores_df[scores_df['algorithm_score'] < 60])
+        
+        fig.add_annotation(
+            x=0.02, y=0.98,
+            xref='paper', yref='paper',
+            text=f"<b>Quality Summary:</b><br>" +
+                 f"Total: {len(scores_df)} trajectories<br>" +
+                 f"🟢 Good (≥80): {good_count}<br>" +
+                 f"🟠 OK (60-79): {ok_count}<br>" +
+                 f"🔴 Bad (<60): {bad_count}<br>" +
+                 f"Mean Score: {scores_df['algorithm_score'].mean():.1f}",
+            showarrow=False,
+            bgcolor="rgba(255,255,255,0.8)",
+            bordercolor="black",
+            borderwidth=1,
+            font=dict(size=12),
+            align="left"
+        )
+        
+        return fig
+        
+    except ImportError:
+        print("Plotly not available for interactive visualization")
+        return None
+    except Exception as e:
+        print(f"Error creating interactive visualization: {e}")
+        return None
 
 def create_scored_3d_visualization(coords_array, results, scores_df):
     """
@@ -6396,10 +6589,13 @@ def create_scored_3d_visualization(coords_array, results, scores_df):
     plt.tight_layout()
     return fig
 
-def create_interactive_annotation_report(scores_df, viz_path, html_path):
+def create_interactive_annotation_report(scores_df, static_viz_path, html_path, interactive_viz_path=None):
     """
-    Create an interactive HTML report for easy annotation
+    Create an interactive HTML report for easy annotation with user choice between static and interactive plots
     """
+    # Determine if interactive visualization is available
+    has_interactive = interactive_viz_path is not None and os.path.exists(interactive_viz_path)
+    
     html_content = f"""
     <!DOCTYPE html>
     <html>
@@ -6409,6 +6605,40 @@ def create_interactive_annotation_report(scores_df, viz_path, html_path):
             body {{ font-family: Arial, sans-serif; margin: 20px; }}
             .header {{ background-color: #f0f0f0; padding: 15px; border-radius: 5px; }}
             .viz-container {{ text-align: center; margin: 20px 0; }}
+            .viz-controls {{ 
+                text-align: center; 
+                margin: 10px 0; 
+                padding: 10px; 
+                background-color: #e8f4f8; 
+                border-radius: 5px; 
+            }}
+            .viz-controls button {{ 
+                padding: 10px 20px; 
+                margin: 0 10px; 
+                font-size: 14px; 
+                border: none; 
+                border-radius: 5px; 
+                cursor: pointer; 
+                transition: background-color 0.3s;
+            }}
+            .viz-controls button.active {{ 
+                background-color: #007bff; 
+                color: white; 
+            }}
+            .viz-controls button:not(.active) {{ 
+                background-color: #f8f9fa; 
+                color: #007bff; 
+                border: 1px solid #007bff; 
+            }}
+            .viz-controls button:hover {{ 
+                opacity: 0.8; 
+            }}
+            .viz-frame {{ 
+                width: 100%; 
+                height: 700px; 
+                border: 1px solid #ddd; 
+                border-radius: 5px; 
+            }}
             .table-container {{ margin: 20px 0; }}
             table {{ border-collapse: collapse; width: 100%; }}
             th, td {{ border: 1px solid #ddd; padding: 8px; text-align: left; }}
@@ -6417,6 +6647,13 @@ def create_interactive_annotation_report(scores_df, viz_path, html_path):
             .ok {{ background-color: #fff3cd; }}
             .bad {{ background-color: #f8d7da; }}
             .instructions {{ background-color: #d1ecf1; padding: 15px; border-radius: 5px; margin: 20px 0; }}
+            .feature-note {{ 
+                background-color: #fff3cd; 
+                padding: 10px; 
+                border-radius: 5px; 
+                margin: 10px 0; 
+                border-left: 4px solid #ffc107; 
+            }}
         </style>
     </head>
     <body>
@@ -6426,8 +6663,29 @@ def create_interactive_annotation_report(scores_df, viz_path, html_path):
         </div>
         
         <div class="viz-container">
-            <h2>3D Visualization</h2>
-            <img src="{os.path.basename(viz_path)}" alt="3D Trajectory Visualization" style="max-width: 100%; height: auto;">
+            <h2>3D Trajectory Visualization</h2>
+            
+            {"" if not has_interactive else '''
+            <div class="viz-controls">
+                <h3>Choose Visualization Type:</h3>
+                <button id="staticBtn" class="active" onclick="showStaticViz()">📊 Static Plot</button>
+                <button id="interactiveBtn" onclick="showInteractiveViz()">🎮 Interactive Plot</button>
+            </div>
+            
+            <div class="feature-note">
+                <strong>💡 Tip:</strong> Use the Interactive Plot for better exploration - you can rotate, zoom, and hover over points for detailed information!
+            </div>
+            '''}
+            
+            <div id="staticViz" class="viz-display">
+                <img src="{os.path.basename(static_viz_path)}" alt="3D Trajectory Visualization" style="max-width: 100%; height: auto;">
+            </div>
+            
+            {"" if not has_interactive else f'''
+            <div id="interactiveViz" class="viz-display" style="display: none;">
+                <iframe src="{os.path.basename(interactive_viz_path)}" class="viz-frame"></iframe>
+            </div>
+            '''}
         </div>
         
         <div class="instructions">
@@ -6436,9 +6694,21 @@ def create_interactive_annotation_report(scores_df, viz_path, html_path):
                 <li>Open the CSV file: <code>trajectory_scores_for_annotation.csv</code></li>
                 <li>For each trajectory, fill in the <code>feedback_label</code> column with: <strong>GOOD</strong>, <strong>BAD</strong>, or <strong>UNCERTAIN</strong></li>
                 <li>Add any notes in the <code>notes</code> column</li>
-                <li>Use the 3D visualization above to help identify trajectories by their ID</li>
+                <li>Use the visualization above to help identify trajectories by their ID</li>
+                <li>{'Switch between static and interactive views using the buttons above' if has_interactive else 'Use the static visualization to examine trajectory quality'}</li>
                 <li>Focus on trajectories where algorithm score disagrees with your visual assessment</li>
             </ol>
+            
+            {'' if not has_interactive else '''
+            <h4>Interactive Plot Features:</h4>
+            <ul>
+                <li><strong>Rotate:</strong> Click and drag to rotate the 3D view</li>
+                <li><strong>Zoom:</strong> Use mouse wheel or zoom controls</li>
+                <li><strong>Hover:</strong> Move mouse over trajectories to see detailed information</li>
+                <li><strong>Legend:</strong> Click items to hide/show trajectory groups</li>
+                <li><strong>Reset:</strong> Double-click to reset the view</li>
+            </ul>
+            '''}
         </div>
         
         <div class="table-container">
@@ -6447,6 +6717,23 @@ def create_interactive_annotation_report(scores_df, viz_path, html_path):
         </div>
         
         <script>
+            // Visualization switching functions
+            function showStaticViz() {{
+                document.getElementById('staticViz').style.display = 'block';
+                {"document.getElementById('interactiveViz').style.display = 'none';" if has_interactive else ""}
+                document.getElementById('staticBtn').classList.add('active');
+                {"document.getElementById('interactiveBtn').classList.remove('active');" if has_interactive else ""}
+            }}
+            
+            {"" if not has_interactive else '''
+            function showInteractiveViz() {
+                document.getElementById('staticViz').style.display = 'none';
+                document.getElementById('interactiveViz').style.display = 'block';
+                document.getElementById('staticBtn').classList.remove('active');
+                document.getElementById('interactiveBtn').classList.add('active');
+            }
+            '''}
+            
             // Add color coding to table rows based on algorithm score
             document.addEventListener('DOMContentLoaded', function() {{
                 const rows = document.querySelectorAll('#scores_table tbody tr');
@@ -6461,6 +6748,9 @@ def create_interactive_annotation_report(scores_df, viz_path, html_path):
                         row.classList.add('bad');
                     }}
                 }});
+                
+                // Set initial view to static
+                showStaticViz();
             }});
         </script>
     </body>
@@ -6469,7 +6759,6 @@ def create_interactive_annotation_report(scores_df, viz_path, html_path):
     
     with open(html_path, 'w') as f:
         f.write(html_content)
-
 
 
 
@@ -7839,13 +8128,14 @@ def visualize_trajectory_comparison(coords_array, integrated_results, combined_t
 #------------------------------------------------------------------------------
 
 def main(use_combined_volume=True, use_original_reports=True, 
-                                     detect_duplicates=True, duplicate_threshold=0.5, 
-                                     use_adaptive_clustering=False, max_iterations=10,
-                                     validate_spacing=True, expected_spacing_range=(3.0, 5.0),
-                                     refine_trajectories=True, max_contacts_per_trajectory=20,
-                                     validate_entry_angles=True, hemisphere='both',
-                                     analyze_contact_angles=True, angle_threshold=40.0,
-                                     create_plotly_visualization=False):  # NEW PARAMETER
+         detect_duplicates=True, duplicate_threshold=0.5, 
+         use_adaptive_clustering=False, max_iterations=10,
+         validate_spacing=True, expected_spacing_range=(3.0, 5.0),
+         refine_trajectories=True, max_contacts_per_trajectory=20,
+         validate_entry_angles=True, hemisphere='both',
+         analyze_contact_angles=True, angle_threshold=60.0,
+         create_plotly_visualization=False,
+         create_interactive_annotation=True): 
     """
     Enhanced main function for electrode trajectory analysis with hemisphere filtering and flexible options
     including adaptive clustering, spacing validation, and trajectory refinement.
@@ -7883,11 +8173,11 @@ def main(use_combined_volume=True, use_original_reports=True,
         
         # Step 1: Load required volumes from Slicer
         print("Loading volumes from Slicer...")
-        electrodes_volume = slicer.util.getNode('P2_electrode_mask_success_1')
-        brain_volume = slicer.util.getNode("patient2_mask_5")
+        electrodes_volume = slicer.util.getNode('P3_electrode_mask_success_1')
+        brain_volume = slicer.util.getNode("patient3_mask_5")
         
         # Create output directories
-        base_dir = r"C:\Users\rocia\Downloads\TFG\Cohort\Centroids\P2_BoltHeadandpaths_trial_success"
+        base_dir = r"C:\Users\rocia\Downloads\TFG\Cohort\Centroids\P3_BoltHeadandpaths_trial_success_interactive"
         
         # NEW: Include hemisphere in output directory name
         output_dir_name = "trajectory_analysis_results"
@@ -7962,7 +8252,7 @@ def main(use_combined_volume=True, use_original_reports=True,
         combined_trajectories = {}
         if use_combined_volume:
             print("Performing combined volume analysis...")
-            combined_volume = slicer.util.getNode('P2_CombinedBoltHeadEntryPointsTrajectoryMask')
+            combined_volume = slicer.util.getNode('P3_CombinedBoltHeadEntryPointsTrajectoryMask')
             
             if combined_volume:
                 # Extract trajectories from combined volume
@@ -8008,7 +8298,7 @@ def main(use_combined_volume=True, use_original_reports=True,
         
         # Step 4: Get entry points if available and filter by hemisphere
         entry_points = None
-        entry_points_volume = slicer.util.getNode('P2_brain_entry_points')
+        entry_points_volume = slicer.util.getNode('P3_brain_entry_points')
         if entry_points_volume:
             all_entry_centroids_ras = get_all_centroids(entry_points_volume)
             if all_entry_centroids_ras:
@@ -8312,7 +8602,7 @@ def main(use_combined_volume=True, use_original_reports=True,
         
         # Step 8: Get bolt directions and filter by hemisphere
         bolt_directions = None
-        bolt_head_volume = slicer.util.getNode('P2_bolt_heads')
+        bolt_head_volume = slicer.util.getNode('P3_bolt_heads')
         
         if bolt_head_volume and entry_points_volume:
             print("Extracting bolt-to-entry directions...")
@@ -8666,7 +8956,13 @@ def main(use_combined_volume=True, use_original_reports=True,
         if use_original_reports:
             print("Creating final trajectory scoring report...")
             try:
-                scores_df, viz_fig = create_final_trajectory_report(coords_array, integrated_results, output_dir)
+                # Add create_interactive parameter based on user preference
+                scores_df, viz_fig = create_final_trajectory_report(
+                    coords_array, 
+                    integrated_results, 
+                    output_dir,
+                    create_interactive=True  # Set to True to enable interactive option
+                )
                 
                 # Print summary
                 print(f"\n=== FINAL SCORING SUMMARY ===")
@@ -8715,10 +9011,11 @@ if __name__ == "__main__":
         refine_trajectories=True,
         max_contacts_per_trajectory=18,
         validate_entry_angles=True,
-        hemisphere='left',
-        analyze_contact_angles=True,     # NEW: Enable contact angle analysis
-        angle_threshold=40.0,             # NEW: Set threshold for flagging non-linear segments
+        hemisphere = 'left',               # Specify hemisphere for analysis
+        analyze_contact_angles=True,     # Enable contact angle analysis
+        angle_threshold=40.0,             # Set threshold for flagging non-linear segments
         create_plotly_visualization=True, #  Enable Plotly visualization
+        create_interactive_annotation=True, # Enable interactive annotation
 
     )
     print("Enhanced analysis completed with contact angle analysis.")

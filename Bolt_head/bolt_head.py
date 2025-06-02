@@ -32,7 +32,7 @@ CONFIG = {
     'max_region_size': 800,
     'morph_kernel_size': 1,
     'principal_axis_length': 15,
-    'output_dir': r"C:\Users\rocia\Downloads\TFG\Cohort\Bolt_heads\P4_entry_adaptive_pdf_features_lines_complete_algorithm"
+    'output_dir': r"C:\Users\rocia\Downloads\TFG\Cohort\Bolt_heads\P1_entry_adaptive_pdf_features_lines_complete_algorithm"
 }
 
 class VolumeHelper:
@@ -121,8 +121,8 @@ class BoltHeadDetector:
     def _load_nodes(self):
         """Load required nodes from Slicer."""
         return (
-            slicer.util.getNode('P4_CTp.3D'),  # CT volume
-            slicer.util.getNode('patient4_mask_5')  # Brain mask
+            slicer.util.getNode('P1_CTp.3D'),  # CT volume
+            slicer.util.getNode('patient1_mask_5')  # Brain mask
         )
         
     def _get_direction_matrix(self, volume_node):
