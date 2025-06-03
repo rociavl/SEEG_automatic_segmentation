@@ -1,0 +1,354 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Automatic SEEG Electrode Localization</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        header {
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(10px);
+            border-radius: 20px;
+            padding: 40px;
+            margin-bottom: 30px;
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1);
+            text-align: center;
+        }
+
+        h1 {
+            color: #2c3e50;
+            font-size: 2.5em;
+            margin-bottom: 10px;
+            font-weight: 700;
+        }
+
+        .subtitle {
+            color: #7f8c8d;
+            font-size: 1.2em;
+            margin-bottom: 20px;
+        }
+
+        .author-info {
+            background: linear-gradient(45deg, #3498db, #9b59b6);
+            color: white;
+            padding: 15px 30px;
+            border-radius: 25px;
+            display: inline-block;
+            margin: 10px;
+        }
+
+        .nav-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+
+        .nav-card {
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(10px);
+            border-radius: 15px;
+            padding: 30px;
+            text-decoration: none;
+            color: inherit;
+            transition: all 0.3s ease;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
+            border: 2px solid transparent;
+        }
+
+        .nav-card:hover {
+            transform: translateY(-10px);
+            box-shadow: 0 20px 50px rgba(0, 0, 0, 0.2);
+            border-color: #3498db;
+        }
+
+        .nav-card h3 {
+            color: #2c3e50;
+            margin-bottom: 15px;
+            font-size: 1.4em;
+        }
+
+        .nav-card p {
+            color: #7f8c8d;
+            margin-bottom: 15px;
+        }
+
+        .tech-stack {
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(10px);
+            border-radius: 15px;
+            padding: 30px;
+            margin-bottom: 30px;
+        }
+
+        .tech-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+            gap: 15px;
+            margin-top: 20px;
+        }
+
+        .tech-badge {
+            background: linear-gradient(45deg, #667eea, #764ba2);
+            color: white;
+            padding: 10px 15px;
+            border-radius: 20px;
+            text-align: center;
+            font-size: 0.9em;
+            font-weight: 500;
+        }
+
+        .highlight-stats {
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(10px);
+            border-radius: 15px;
+            padding: 30px;
+            margin-bottom: 30px;
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 20px;
+            margin-top: 20px;
+        }
+
+        .stat-item {
+            text-align: center;
+            padding: 20px;
+            background: linear-gradient(45deg, #ff6b6b, #feca57);
+            border-radius: 15px;
+            color: white;
+        }
+
+        .stat-number {
+            font-size: 2.5em;
+            font-weight: bold;
+            display: block;
+        }
+
+        .icon {
+            font-size: 2em;
+            margin-bottom: 10px;
+        }
+
+        .demo-section {
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(10px);
+            border-radius: 15px;
+            padding: 30px;
+            margin-bottom: 30px;
+        }
+
+        .demo-iframe {
+            width: 100%;
+            height: 500px;
+            border: none;
+            border-radius: 10px;
+            margin-top: 15px;
+        }
+
+        footer {
+            text-align: center;
+            color: rgba(255, 255, 255, 0.8);
+            margin-top: 40px;
+            padding: 20px;
+        }
+
+        .github-link {
+            background: #333;
+            color: white;
+            padding: 12px 25px;
+            border-radius: 25px;
+            text-decoration: none;
+            display: inline-block;
+            margin: 10px;
+            transition: all 0.3s ease;
+        }
+
+        .github-link:hover {
+            background: #555;
+            transform: scale(1.05);
+        }
+
+        @media (max-width: 768px) {
+            .container {
+                padding: 10px;
+            }
+            
+            h1 {
+                font-size: 2em;
+            }
+            
+            .nav-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🧠 Automatic SEEG Electrode Localization</h1>
+            <p class="subtitle">AI-Powered Medical Software for Epilepsy Surgery Planning</p>
+            <div class="author-info">
+                <strong>👨‍🎓 Bachelor's Thesis by [Your Name] • Age 21</strong><br>
+                <small>Hospital del Mar • UPF • UPC Collaboration</small>
+            </div>
+        </header>
+
+        <div class="nav-grid">
+            <a href="methodology.html" class="nav-card">
+                <div class="icon">⚙️</div>
+                <h3>Methodology</h3>
+                <p>6-stage pipeline: Brain extraction → Enhancement → Voting → Contact prediction → Trajectory reconstruction</p>
+                <small><strong>Multi-algorithm ensemble approach</strong></small>
+            </a>
+
+            <a href="results.html" class="nav-card">
+                <div class="icon">📊</div>
+                <h3>Results</h3>
+                <p>98.8% accuracy within 2mm clinical threshold. Processing time: 4+ hours → 30 minutes</p>
+                <small><strong>Clinically validated performance</strong></small>
+            </a>
+
+            <a href="demo.html" class="nav-card">
+                <div class="icon">🎮</div>
+                <h3>Interactive Demo</h3>
+                <p>3D visualizations, trajectory analysis, and confidence scoring system in action</p>
+                <small><strong>Explore the algorithm</strong></small>
+            </a>
+
+            <a href="thesis.pdf" class="nav-card" target="_blank">
+                <div class="icon">📄</div>
+                <h3>Full Thesis</h3>
+                <p>Complete 159-page technical document with mathematical formulations and validation</p>
+                <small><strong>Download PDF</strong></small>
+            </a>
+        </div>
+
+        <div class="highlight-stats">
+            <h2>🏆 Key Achievements</h2>
+            <div class="stats-grid">
+                <div class="stat-item">
+                    <span class="stat-number">98.8%</span>
+                    <span>Clinical Accuracy</span>
+                </div>
+                <div class="stat-item">
+                    <span class="stat-number">30min</span>
+                    <span>Processing Time</span>
+                </div>
+                <div class="stat-item">
+                    <span class="stat-number">38</span>
+                    <span>Mask Ensemble</span>
+                </div>
+                <div class="stat-item">
+                    <span class="stat-number">100%</span>
+                    <span>Perfect Top-N Selection</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="tech-stack">
+            <h2>🛠️ Technology Stack</h2>
+            <div class="tech-grid">
+                <div class="tech-badge">3D Slicer</div>
+                <div class="tech-badge">MONAI</div>
+                <div class="tech-badge">PyTorch</div>
+                <div class="tech-badge">3D U-Net</div>
+                <div class="tech-badge">Random Forest</div>
+                <div class="tech-badge">LightGBM</div>
+                <div class="tech-badge">DBSCAN</div>
+                <div class="tech-badge">Louvain</div>
+                <div class="tech-badge">SimpleITK</div>
+                <div class="tech-badge">VTK</div>
+                <div class="tech-badge">OpenCV</div>
+                <div class="tech-badge">scikit-learn</div>
+            </div>
+        </div>
+
+        <div class="demo-section">
+            <h2>🎯 What Problem Does This Solve?</h2>
+            <p style="font-size: 1.1em; margin-bottom: 20px;">
+                <strong>Current Challenge:</strong> Manual SEEG electrode localization requires 4+ hours of collaborative work 
+                between neurosurgeons and neurologists per patient, creating operational bottlenecks and patient safety risks.
+            </p>
+            <p style="font-size: 1.1em; margin-bottom: 20px;">
+                <strong>Our Solution:</strong> Fully automated pipeline that reduces processing time to 30 minutes while 
+                maintaining clinical accuracy through intelligent human-machine collaboration.
+            </p>
+            <p style="font-size: 1.1em;">
+                <strong>Clinical Impact:</strong> Currently deployed at Hospital del Mar's Epilepsy Unit, 
+                enabling faster surgical planning and improved patient outcomes.
+            </p>
+        </div>
+
+        <footer>
+            <a href="https://github.com/yourusername/seeg-localization" class="github-link">
+                🔗 View on GitHub
+            </a>
+            <a href="mailto:your.email@domain.com" class="github-link">
+                📧 Contact
+            </a>
+            <p style="margin-top: 20px;">
+                🏥 Developed in collaboration with Hospital del Mar • UPF Center for Brain and Cognition
+            </p>
+        </footer>
+    </div>
+
+    <script>
+        // Add smooth scroll behavior for internal links
+        document.querySelectorAll('a[href^="#"]').forEach(anchor => {
+            anchor.addEventListener('click', function (e) {
+                e.preventDefault();
+                document.querySelector(this.getAttribute('href')).scrollIntoView({
+                    behavior: 'smooth'
+                });
+            });
+        });
+
+        // Add animation on scroll
+        const observerOptions = {
+            threshold: 0.1,
+            rootMargin: '0px 0px -50px 0px'
+        };
+
+        const observer = new IntersectionObserver(function(entries) {
+            entries.forEach(entry => {
+                if (entry.isIntersecting) {
+                    entry.target.style.opacity = '1';
+                    entry.target.style.transform = 'translateY(0)';
+                }
+            });
+        }, observerOptions);
+
+        // Observe all cards
+        document.querySelectorAll('.nav-card, .tech-stack, .highlight-stats, .demo-section').forEach(el => {
+            el.style.opacity = '0';
+            el.style.transform = 'translateY(30px)';
+            el.style.transition = 'all 0.6s ease';
+            observer.observe(el);
+        });
+    </script>
+</body>
+</html>
