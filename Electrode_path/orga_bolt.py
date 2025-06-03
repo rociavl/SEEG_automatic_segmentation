@@ -43,7 +43,7 @@ from Outermost_centroids_coordinates.outermost_centroids_vol_slicer import (
     filter_centroids_by_surface_distance
 )
 from End_points.midplane_prueba import get_all_centroids
-from Electrode_path.construction_4 import (create_summary_page, create_3d_visualization,
+from Electrode_path.construction_4 import (create_3d_visualization,
     create_trajectory_details_page, create_noise_points_page)
 #------------------------------------------------------------------------------
 # PART 1: UTILITY CLASSES AND FUNCTIONS
@@ -87,6 +87,263 @@ def calculate_angles(direction):
         angles[name] = angle
         
     return angles
+
+def create_summary_page(results):
+    fig = plt.figure(figsize=(12, 15))
+    fig.suptitle('Trajectory Analysis Summary Report', fontsize=16, y=0.98)
+    
+    # Create grid layout
+    gs = GridSpec(4, 1, figure=fig, height_ratios=[1, 1, 1, 2])
+    
+    # Parameters section
+    ax1 = fig.add_subplot(gs[0])
+    ax1.axis('off')
+    
+    params_text = "Analysis Parameters:\n"
+    
+    # Handle different parameter structures
+    if 'parameters' in results:
+        params = results['parameters']
+        
+        # Check for adaptive clustering parameters
+        if 'use_adaptive_clustering' in params and params['use_adaptive_clustering']:
+            if 'adaptive_parameters' in results:
+                adaptive_params = results['adaptive_parameters']
+                params_text += f"- Adaptive clustering used: Yes\n"
+                params_text += f"- Optimal eps: {adaptive_params['optimal_eps']:.2f} mm\n"
+                params_text += f"- Optimal min neighbors: {adaptive_params['optimal_min_neighbors']}\n"
+                params_text += f"- Parameter search score: {adaptive_params['score']:.2f}\n"
+            else:
+                params_text += f"- Adaptive clustering: Yes (parameters not found)\n"
+        else:
+            # Fixed parameters - try to get from integrated_analysis
+            if 'integrated_analysis' in results and 'parameters' in results['integrated_analysis']:
+                int_params = results['integrated_analysis']['parameters']
+                params_text += f"- Max neighbor distance: {int_params.get('max_neighbor_distance', 'N/A')} mm\n"
+                params_text += f"- Min neighbors: {int_params.get('min_neighbors', 'N/A')}\n"
+            else:
+                params_text += f"- Fixed parameters used (details not available)\n"
+        
+        # Other parameters
+        params_text += f"- Expected contact counts: {params.get('expected_contact_counts', 'N/A')}\n"
+        params_text += f"- Hemisphere: {params.get('hemisphere', 'both')}\n"
+        params_text += f"- Validate spacing: {params.get('validate_spacing', False)}\n"
+        if params.get('validate_spacing', False):
+            spacing_range = params.get('expected_spacing_range', (3.0, 5.0))
+            params_text += f"- Expected spacing range: {spacing_range[0]}-{spacing_range[1]} mm\n"
+        params_text += f"- Refine trajectories: {params.get('refine_trajectories', False)}\n"
+        params_text += f"- Validate entry angles: {params.get('validate_entry_angles', False)}\n"
+    
+    # Electrode count information
+    if 'electrode_count' in results:
+        params_text += f"- Total electrodes analyzed: {results['electrode_count']}\n"
+    if 'original_electrode_count' in results:
+        params_text += f"- Original electrodes: {results['original_electrode_count']}\n"
+    
+    # Hemisphere filtering info
+    if 'hemisphere_filtering' in results:
+        hemi_info = results['hemisphere_filtering']
+        if hemi_info['hemisphere'] != 'both':
+            params_text += f"- Hemisphere filtering: {hemi_info['hemisphere']} ({hemi_info['filtering_efficiency']:.1f}% retained)\n"
+    
+    params_text += "\n"
+    
+    # Get DBSCAN results from integrated_analysis
+    integrated_results = results.get('integrated_analysis', {})
+    
+    if 'dbscan' in integrated_results:
+        dbscan_results = integrated_results['dbscan']
+        params_text += "DBSCAN Results:\n"
+        params_text += f"- Number of clusters: {dbscan_results.get('n_clusters', 'N/A')}\n"
+        params_text += f"- Noise points: {dbscan_results.get('noise_points', 'N/A')}\n"
+        params_text += f"- Cluster sizes: {dbscan_results.get('cluster_sizes', 'N/A')}\n\n"
+    
+    # Louvain community detection
+    if 'louvain' in integrated_results and 'error' not in integrated_results['louvain']:
+        louvain_results = integrated_results['louvain']
+        params_text += "Louvain Community Detection:\n"
+        params_text += f"- Number of communities: {louvain_results.get('n_communities', 'N/A')}\n"
+        params_text += f"- Modularity score: {louvain_results.get('modularity', 0):.3f}\n"
+        params_text += f"- Community sizes: {louvain_results.get('community_sizes', 'N/A')}\n\n"
+    
+    # Trajectory count
+    n_trajectories = integrated_results.get('n_trajectories', results.get('n_trajectories', 0))
+    params_text += f"Trajectories Detected: {n_trajectories}\n"
+    
+    # Add hemisphere splitting info if available
+    if 'hemisphere_splitting' in integrated_results:
+        split_info = integrated_results['hemisphere_splitting']
+        if split_info['splits_performed'] > 0:
+            params_text += f"- Hemisphere splits performed: {split_info['splits_performed']}\n"
+            params_text += f"- Final trajectory count: {split_info['final_count']}\n"
+    
+    # Add trajectory refinement info if available
+    if 'trajectory_refinement' in integrated_results:
+        refinement = integrated_results['trajectory_refinement']
+        params_text += f"- Trajectory refinement: {refinement['merged_count']} merged, {refinement['split_count']} split\n"
+    
+    ax1.text(0.05, 0.95, params_text, ha='left', va='top', fontsize=12,
+            bbox=dict(facecolor='white', alpha=0.8))
+    
+    # Trajectory metrics table
+    trajectories = integrated_results.get('trajectories', results.get('trajectories', []))
+    
+    if trajectories and len(trajectories) > 0:
+        ax2 = fig.add_subplot(gs[1])
+        ax2.axis('off')
+        
+        # Prepare data for table
+        table_data = []
+        columns = ['ID', 'Electrodes', 'Length (mm)', 'Linearity', 'Avg Spacing (mm)', 'Spacing Var']
+        
+        for traj in trajectories:
+            # Handle different ID formats (including hemisphere splits)
+            traj_id = traj['cluster_id']
+            if 'is_hemisphere_split' in traj and traj['is_hemisphere_split']:
+                traj_id = f"{traj_id} ({traj['hemisphere'][0].upper()})"
+            elif 'merged_from' in traj:
+                traj_id = f"{traj_id} (M)"
+            elif 'split_from' in traj:
+                traj_id = f"{traj_id} (S)"
+            
+            row = [
+                traj_id,
+                traj['electrode_count'],
+                f"{traj.get('length_mm', 0):.1f}",
+                f"{traj.get('linearity', 0):.2f}",
+                f"{traj.get('avg_spacing_mm', 0):.2f}" if traj.get('avg_spacing_mm') else 'N/A',
+                f"{traj.get('spacing_regularity', 0):.2f}" if traj.get('spacing_regularity') else 'N/A'
+            ]
+            table_data.append(row)
+        
+        # Sort by trajectory ID for better readability
+        table_data.sort(key=lambda x: str(x[0]))
+        
+        # Limit to first 15 trajectories if too many
+        if len(table_data) > 15:
+            table_data = table_data[:15]
+            # Add a note about truncation
+            ax2.text(0.5, 0.02, f"Note: Showing first 15 of {len(trajectories)} trajectories",
+                    ha='center', va='bottom', transform=ax2.transAxes, fontsize=10, style='italic')
+        
+        table = ax2.table(cellText=table_data, colLabels=columns,
+                         loc='center', cellLoc='center')
+        table.auto_set_font_size(False)
+        table.set_fontsize(9)
+        table.scale(1, 1.3)
+        ax2.set_title('Trajectory Metrics', pad=20)
+    else:
+        ax2 = fig.add_subplot(gs[1])
+        ax2.axis('off')
+        ax2.text(0.5, 0.5, 'No trajectory data available', ha='center', va='center', 
+                fontsize=14, transform=ax2.transAxes)
+        ax2.set_title('Trajectory Metrics', pad=20)
+    
+    # Cluster-community mapping
+    if 'combined' in integrated_results and 'dbscan_to_louvain_mapping' in integrated_results['combined']:
+        ax3 = fig.add_subplot(gs[2])
+        ax3.axis('off')
+        
+        mapping_text = "Cluster to Community Mapping:\n\n"
+        mapping = integrated_results['combined']['dbscan_to_louvain_mapping']
+        
+        # Limit the number of mappings shown
+        mapping_items = list(mapping.items())
+        if len(mapping_items) > 10:
+            mapping_items = mapping_items[:10]
+            mapping_text += "First 10 mappings shown:\n"
+        
+        for cluster, community in mapping_items:
+            mapping_text += f"Cluster {cluster} → Community {community}\n"
+        
+        if len(mapping) > 10:
+            mapping_text += f"... and {len(mapping) - 10} more mappings\n"
+        
+        if 'avg_cluster_purity' in integrated_results['combined']:
+            mapping_text += f"\nAverage Cluster Purity: {integrated_results['combined']['avg_cluster_purity']:.2f}"
+        
+        ax3.text(0.05, 0.95, mapping_text, ha='left', va='top', fontsize=12,
+                bbox=dict(facecolor='white', alpha=0.8))
+        ax3.set_title('Cluster-Community Relationships', pad=10)
+    else:
+        ax3 = fig.add_subplot(gs[2])
+        ax3.axis('off')
+        ax3.text(0.5, 0.5, 'No cluster-community mapping available', ha='center', va='center',
+                fontsize=12, transform=ax3.transAxes)
+        ax3.set_title('Cluster-Community Relationships', pad=10)
+    
+    # Additional analysis summary
+    ax4 = fig.add_subplot(gs[3])
+    ax4.axis('off')
+    
+    summary_text = "Analysis Summary:\n\n"
+    
+    # Electrode validation summary
+    if 'electrode_validation' in integrated_results:
+        validation = integrated_results['electrode_validation']['summary']
+        summary_text += f"Electrode Validation:\n"
+        summary_text += f"- Valid clusters: {validation['valid_clusters']}/{validation['total_clusters']} ({validation['match_percentage']:.1f}%)\n"
+        summary_text += f"- Distribution by contact count: {dict(validation['by_size'])}\n\n"
+    
+    # Spacing validation summary
+    if 'spacing_validation_summary' in integrated_results:
+        spacing = integrated_results['spacing_validation_summary']
+        summary_text += f"Spacing Validation:\n"
+        summary_text += f"- Valid trajectories: {spacing['valid_trajectories']}/{spacing['total_trajectories']} ({spacing['valid_percentage']:.1f}%)\n"
+        summary_text += f"- Mean spacing: {spacing['mean_spacing']:.2f}mm\n\n"
+    
+    # Contact angle analysis summary
+    if 'contact_angle_analysis' in results:
+        angle_analyses = results['contact_angle_analysis']
+        flagged_count = sum(1 for a in angle_analyses.values() if not a['is_linear'])
+        total_count = len(angle_analyses)
+        summary_text += f"Contact Angle Analysis:\n"
+        summary_text += f"- Flagged trajectories: {flagged_count}/{total_count} ({flagged_count/total_count*100:.1f}%)\n"
+        if angle_analyses:
+            all_max_angles = [a['max_curvature'] for a in angle_analyses.values()]
+            summary_text += f"- Max angle deviation: {max(all_max_angles):.1f}°\n\n"
+    
+    # Entry angle validation summary
+    if 'entry_angle_validation' in results:
+        entry_val = results['entry_angle_validation']
+        summary_text += f"Entry Angle Validation:\n"
+        summary_text += f"- Valid angles: {entry_val['valid_count']}/{entry_val['total_count']} ({entry_val['valid_percentage']:.1f}%)\n\n"
+    
+    # Combined volume analysis summary
+    if 'combined_volume' in results:
+        combined = results['combined_volume']
+        summary_text += f"Combined Volume Analysis:\n"
+        summary_text += f"- Trajectories detected: {combined['trajectory_count']}\n\n"
+    
+    # Duplicate analysis summary
+    if 'duplicate_summary' in results:
+        dup_summary = results['duplicate_summary']
+        summary_text += f"Duplicate Analysis:\n"
+        summary_text += f"- Trajectories with duplicates: {dup_summary['trajectories_with_duplicates']}/{dup_summary['trajectories_analyzed']}\n"
+        summary_text += f"- Total duplicate groups: {dup_summary['total_duplicate_groups']}\n\n"
+    
+    # Final scoring summary
+    if 'final_scoring' in results:
+        scoring = results['final_scoring']['summary']
+        summary_text += f"Final Quality Scoring:\n"
+        summary_text += f"- High quality (≥80): {scoring['high_quality']}\n"
+        summary_text += f"- Medium quality (60-79): {scoring['medium_quality']}\n"
+        summary_text += f"- Low quality (<60): {scoring['low_quality']}\n"
+        summary_text += f"- Mean score: {scoring['mean_score']:.2f}\n\n"
+    
+    # Execution time
+    if 'execution_time' in results:
+        exec_time = results['execution_time']
+        minutes = int(exec_time // 60)
+        seconds = exec_time % 60
+        summary_text += f"Execution Time: {minutes} min {seconds:.2f} sec"
+    
+    ax4.text(0.05, 0.95, summary_text, ha='left', va='top', fontsize=11,
+            bbox=dict(facecolor='white', alpha=0.8))
+    ax4.set_title('Analysis Summary', pad=10)
+    
+    plt.tight_layout()
+    return fig
 
 #------------------------------------------------------------------------------
 # PART 2: CORE ANALYSIS FUNCTIONS
@@ -5957,6 +6214,251 @@ def create_plotly_interactive_angle_visualization(trajectory_angle_analyses, coo
     
     return fig
 
+###########
+
+def split_trajectories_at_hemisphere_boundary(trajectories, coords_array, results, hemisphere='both'):
+    """
+    Split trajectories that cross the hemisphere boundary (x=0 in RAS coordinates).
+    
+    This function identifies trajectories that have contacts in both hemispheres
+    and splits them at x=0, creating separate trajectories for each hemisphere.
+    
+    Args:
+        trajectories (list): List of trajectory dictionaries
+        coords_array (numpy.ndarray): Array of electrode coordinates
+        results (dict): Results from trajectory analysis (contains graph for cluster mapping)
+        hemisphere (str): Target hemisphere ('left', 'right', or 'both')
+        
+    Returns:
+        tuple: (updated_trajectories, split_info)
+            - updated_trajectories: List of trajectories with splits applied
+            - split_info: Dictionary with information about splits performed
+    """
+    import numpy as np
+    from sklearn.decomposition import PCA
+    from collections import defaultdict
+    
+    if hemisphere.lower() != 'both':
+        # Hemisphere filtering already applied, no need to split
+        return trajectories, {'splits_performed': 0, 'original_count': len(trajectories)}
+    
+    # Get cluster assignments from results
+    clusters = np.array([node[1]['dbscan_cluster'] for node in results['graph'].nodes(data=True)])
+    
+    updated_trajectories = []
+    split_info = {
+        'splits_performed': 0,
+        'original_count': len(trajectories),
+        'split_trajectories': [],
+        'hemisphere_target': hemisphere
+    }
+    
+    # Maximum existing cluster ID to ensure we create unique IDs
+    existing_ids = [traj['cluster_id'] for traj in trajectories]
+    max_id = max([int(id) if isinstance(id, (int, np.integer)) else 0 for id in existing_ids] + [0])
+    id_offset = max_id + 1000  # Large offset to avoid conflicts
+    
+    for traj in trajectories:
+        cluster_id = traj['cluster_id']
+        
+        # Get coordinates for this trajectory
+        mask = clusters == cluster_id
+        if not np.any(mask):
+            # No coordinates found, keep original trajectory
+            updated_trajectories.append(traj)
+            continue
+            
+        cluster_coords = coords_array[mask]
+        
+        # Check if trajectory crosses hemisphere boundary (x=0)
+        x_coords = cluster_coords[:, 0]  # RAS x coordinates
+        has_left = np.any(x_coords < 0)   # Left hemisphere (x < 0)
+        has_right = np.any(x_coords > 0)  # Right hemisphere (x > 0)
+        
+        if not (has_left and has_right):
+            # Trajectory doesn't cross boundary, keep original
+            updated_trajectories.append(traj)
+            continue
+        
+        print(f"Splitting trajectory {cluster_id} at hemisphere boundary (x=0)")
+        
+        # Split coordinates by hemisphere
+        left_mask = x_coords < 0
+        right_mask = x_coords > 0
+        boundary_mask = np.abs(x_coords) < 0.5  # Points very close to boundary
+        
+        left_coords = cluster_coords[left_mask]
+        right_coords = cluster_coords[right_mask]
+        boundary_coords = cluster_coords[boundary_mask]
+        
+        # Add boundary points to both sides if they exist
+        if len(boundary_coords) > 0:
+            if len(left_coords) > 0:
+                left_coords = np.vstack([left_coords, boundary_coords])
+            if len(right_coords) > 0:
+                right_coords = np.vstack([right_coords, boundary_coords])
+        
+        # Create split trajectories
+        split_trajectories = []
+        hemisphere_coords = {'left': left_coords, 'right': right_coords}
+        hemisphere_names = {'left': 'L', 'right': 'R'}
+        
+        for hemi_name, hemi_coords in hemisphere_coords.items():
+            if len(hemi_coords) < 3:  # Need at least 3 points for meaningful trajectory
+                continue
+            
+            # Create new trajectory ID
+            new_id = id_offset + split_info['splits_performed'] * 10 + (1 if hemi_name == 'left' else 2)
+            
+            # Create new trajectory dictionary based on original
+            split_traj = traj.copy()
+            split_traj['cluster_id'] = new_id
+            split_traj['electrode_count'] = len(hemi_coords)
+            
+            # Store split information in metadata
+            split_traj['is_hemisphere_split'] = True
+            split_traj['split_from'] = cluster_id
+            split_traj['hemisphere'] = hemi_name
+            split_traj['split_label'] = f"H{hemisphere_names[hemi_name]}_{cluster_id}"
+            
+            # Sort coordinates along trajectory direction
+            if len(hemi_coords) > 2:
+                # Use PCA to find principal direction
+                pca = PCA(n_components=3)
+                pca.fit(hemi_coords)
+                direction = pca.components_[0]
+                center = np.mean(hemi_coords, axis=0)
+                projected = np.dot(hemi_coords - center, direction)
+                sorted_indices = np.argsort(projected)
+                sorted_coords = hemi_coords[sorted_indices]
+            else:
+                sorted_coords = hemi_coords
+                direction = np.array([1, 0, 0])  # Default direction
+                center = np.mean(hemi_coords, axis=0)
+            
+            # Update trajectory properties
+            split_traj['endpoints'] = [
+                sorted_coords[0].tolist(),
+                sorted_coords[-1].tolist()
+            ]
+            split_traj['direction'] = direction.tolist()
+            split_traj['center'] = center.tolist()
+            split_traj['length_mm'] = float(np.linalg.norm(
+                sorted_coords[-1] - sorted_coords[0]
+            ))
+            split_traj['sorted_coords'] = sorted_coords.tolist()
+            
+            # Update linearity using PCA
+            if len(hemi_coords) > 2:
+                split_traj['linearity'] = float(pca.explained_variance_ratio_[0])
+                split_traj['pca_variance'] = pca.explained_variance_ratio_.tolist()
+            else:
+                split_traj['linearity'] = 1.0
+                split_traj['pca_variance'] = [1.0, 0.0, 0.0]
+            
+            # Copy spacing validation if it exists
+            if 'spacing_validation' in traj:
+                # Recalculate spacing for the split trajectory 
+                spacing_validation = validate_electrode_spacing(
+                    sorted_coords, 
+                    traj['spacing_validation'].get('expected_range', (3.0, 5.0))
+                )
+                split_traj['spacing_validation'] = spacing_validation
+            
+            # Copy and adjust contact angles if they exist
+            if 'contact_angles' in traj:
+                # Initialize with default values - would need to recalculate for accuracy
+                split_traj['contact_angles'] = {
+                    'curvature_angles': [],
+                    'direction_changes': [],
+                    'max_curvature': 0,
+                    'mean_curvature': 0,
+                    'std_curvature': 0,
+                    'max_direction_change': 0,
+                    'mean_direction_change': 0,
+                    'cumulative_direction_change': 0,
+                    'is_linear': True,
+                    'linearity_score': 1.0,
+                    'flagged_segments_count': 0,
+                    'angle_threshold': traj['contact_angles'].get('angle_threshold', 40.0)
+                }
+            
+            split_trajectories.append(split_traj)
+        
+        # Add split trajectories to results
+        if len(split_trajectories) > 0:
+            updated_trajectories.extend(split_trajectories)
+            split_info['splits_performed'] += 1
+            split_info['split_trajectories'].append({
+                'original_id': cluster_id,
+                'split_ids': [t['cluster_id'] for t in split_trajectories],
+                'hemispheres': [t['hemisphere'] for t in split_trajectories],
+                'original_contacts': traj['electrode_count'],
+                'split_contacts': [t['electrode_count'] for t in split_trajectories]
+            })
+            
+            print(f"  → Created {len(split_trajectories)} hemisphere trajectories:")
+            for st in split_trajectories:
+                print(f"    • {st['hemisphere']} hemisphere: ID {st['cluster_id']}, {st['electrode_count']} contacts")
+        else:
+            # Couldn't create valid splits, keep original
+            updated_trajectories.append(traj)
+            print(f"  → Could not create valid splits, keeping original trajectory")
+    
+    split_info['final_count'] = len(updated_trajectories)
+    
+    if split_info['splits_performed'] > 0:
+        print(f"\nHemisphere splitting summary:")
+        print(f"- Original trajectories: {split_info['original_count']}")
+        print(f"- Trajectories split: {split_info['splits_performed']}")
+        print(f"- Final trajectories: {split_info['final_count']}")
+    
+    return updated_trajectories, split_info
+
+
+def apply_hemisphere_splitting_to_results(results, coords_array, hemisphere='both'):
+    """
+    Apply hemisphere splitting to trajectory results and update all related data structures.
+    
+    Args:
+        results (dict): Results dictionary from trajectory analysis
+        coords_array (numpy.ndarray): Array of electrode coordinates  
+        hemisphere (str): Target hemisphere ('left', 'right', or 'both')
+        
+    Returns:
+        dict: Updated results with hemisphere splitting applied
+    """
+    if hemisphere.lower() != 'both' or 'trajectories' not in results:
+        # No splitting needed - either hemisphere filtering already applied or no trajectories
+        return results
+    
+    # Apply hemisphere splitting
+    original_trajectories = results['trajectories']
+    updated_trajectories, split_info = split_trajectories_at_hemisphere_boundary(
+        original_trajectories, coords_array, results, hemisphere
+    )
+    
+    # Update results
+    if split_info['splits_performed'] > 0:
+        # Store original trajectories
+        results['original_trajectories_before_hemisphere_split'] = original_trajectories
+        
+        # Update main trajectory list
+        results['trajectories'] = updated_trajectories
+        results['n_trajectories'] = len(updated_trajectories)
+        
+        # Store split information
+        results['hemisphere_splitting'] = split_info
+        
+        # Update electrode validation if it exists (trajectories have changed)
+        if 'electrode_validation' in results:
+            expected_counts = results.get('parameters', {}).get('expected_contact_counts', [5, 8, 10, 12, 15, 18])
+            validation = validate_electrode_clusters(results, expected_counts)
+            results['electrode_validation'] = validation
+        
+        print(f"✅ Applied hemisphere splitting to {split_info['splits_performed']} trajectories")
+    
+    return results
 
 #------------------------------------------------------------------------------
 # PART 2.11: FINAL SCORING 
@@ -6760,8 +7262,234 @@ def create_interactive_annotation_report(scores_df, static_viz_path, html_path, 
     with open(html_path, 'w') as f:
         f.write(html_content)
 
+#------------------------------------------------------------------------------
+# PART 2.12: SIMPLE HEMISPHERE ANALYSIS INTEGRATION
+#------------------------------------------------------------------------------
 
+def analyze_both_hemispheres_separately(coords_array, entry_points=None, 
+                                       max_neighbor_distance=7.5, min_neighbors=3,
+                                       expected_spacing_range=(3.0, 5.0),
+                                       use_adaptive_clustering=False, 
+                                       expected_contact_counts=[5, 8, 10, 12, 15, 18],
+                                       max_iterations=10):
+    """
+    Simple function to analyze both hemispheres separately and combine the results.
+    
+    This function:
+    1. Splits coordinates by hemisphere
+    2. Runs trajectory analysis on each hemisphere independently (with adaptive clustering if requested)
+    3. Combines the results into a single unified result
+    4. Returns the same format as integrated_trajectory_analysis()
+    
+    Args:
+        coords_array: Array of electrode coordinates
+        entry_points: Entry point coordinates (optional)
+        max_neighbor_distance: DBSCAN eps parameter (used if adaptive=False)
+        min_neighbors: DBSCAN min_samples parameter (used if adaptive=False)
+        expected_spacing_range: Expected contact spacing range
+        use_adaptive_clustering: Whether to use adaptive parameter selection
+        expected_contact_counts: Expected electrode contact counts for adaptive clustering
+        max_iterations: Max iterations for adaptive parameter search
+        
+    Returns:
+        dict: Combined results in the same format as integrated_trajectory_analysis()
+    """
+    print("Analyzing hemispheres separately for better trajectory detection...")
+    
+    # Step 1: Split coordinates by hemisphere
+    left_mask = coords_array[:, 0] < 0  # RAS x < 0 is left
+    right_mask = coords_array[:, 0] > 0  # RAS x > 0 is right
+    
+    left_coords = coords_array[left_mask]
+    right_coords = coords_array[right_mask]
+    
+    # Split entry points if provided
+    left_entry = None
+    right_entry = None
+    if entry_points is not None:
+        left_entry_mask = entry_points[:, 0] < 0
+        right_entry_mask = entry_points[:, 0] > 0
+        left_entry = entry_points[left_entry_mask] if np.any(left_entry_mask) else None
+        right_entry = entry_points[right_entry_mask] if np.any(right_entry_mask) else None
+    
+    print(f"Split coordinates: {len(left_coords)} left, {len(right_coords)} right")
+    
+    # Step 2: Analyze each hemisphere independently
+    left_results = None
+    right_results = None
+    
+    if len(left_coords) >= min_neighbors:
+        print("Analyzing left hemisphere...")
+        if use_adaptive_clustering:
+            # Run adaptive clustering for left hemisphere
+            left_results = perform_adaptive_trajectory_analysis(
+                coords_array=left_coords,
+                entry_points=left_entry,
+                initial_eps=max_neighbor_distance,
+                initial_min_neighbors=min_neighbors,
+                expected_contact_counts=expected_contact_counts,
+                output_dir=None  # No individual output for hemisphere
+            )
+        else:
+            # Run regular analysis for left hemisphere
+            left_results = integrated_trajectory_analysis(
+                coords_array=left_coords,
+                entry_points=left_entry,
+                max_neighbor_distance=max_neighbor_distance,
+                min_neighbors=min_neighbors,
+                expected_spacing_range=expected_spacing_range
+            )
+    
+    if len(right_coords) >= min_neighbors:
+        print("Analyzing right hemisphere...")
+        if use_adaptive_clustering:
+            # Run adaptive clustering for right hemisphere
+            right_results = perform_adaptive_trajectory_analysis(
+                coords_array=right_coords,
+                entry_points=right_entry,
+                initial_eps=max_neighbor_distance,
+                initial_min_neighbors=min_neighbors,
+                expected_contact_counts=expected_contact_counts,
+                output_dir=None  # No individual output for hemisphere
+            )
+        else:
+            # Run regular analysis for right hemisphere
+            right_results = integrated_trajectory_analysis(
+                coords_array=right_coords,
+                entry_points=right_entry,
+                max_neighbor_distance=max_neighbor_distance,
+                min_neighbors=min_neighbors,
+                expected_spacing_range=expected_spacing_range
+            )
+    
+    # Step 3: Combine results into single unified result
+    combined_results = combine_hemisphere_analysis_results(
+        left_results, right_results, left_coords, right_coords, 
+        left_mask, right_mask, coords_array
+    )
+    
+    print(f"Combined analysis: {combined_results['n_trajectories']} total trajectories")
+    return combined_results
 
+def combine_hemisphere_analysis_results(left_results, right_results, 
+                                      left_coords, right_coords,
+                                      left_mask, right_mask, original_coords):
+    """
+    Combine hemisphere analysis results into unified format.
+    
+    Returns results in exactly the same format as integrated_trajectory_analysis()
+    so it's a drop-in replacement.
+    """
+    # Initialize combined results with the same structure
+    combined_results = {
+        'dbscan': {'n_clusters': 0, 'noise_points': 0, 'cluster_sizes': []},
+        'louvain': {'n_communities': 0, 'modularity': 0.0, 'community_sizes': []},
+        'combined': {},
+        'trajectories': [],
+        'n_trajectories': 0,
+        'parameters': {
+            'n_electrodes': len(original_coords),
+            'hemisphere_analysis': True
+        },
+        'pca_stats': []
+    }
+    
+    # Create a unified graph that maps back to original coordinate indices
+    import networkx as nx
+    G = nx.Graph()
+    
+    # Add all original coordinates as nodes
+    for i, coord in enumerate(original_coords):
+        hemisphere = 'left' if original_coords[i, 0] < 0 else 'right'
+        G.add_node(i, pos=coord, hemisphere=hemisphere, dbscan_cluster=-1)
+    
+    trajectory_id_counter = 0
+    all_trajectories = []
+    
+    # Process left hemisphere results
+    if left_results and 'trajectories' in left_results:
+        left_trajectories = process_hemisphere_trajectories(
+            left_results, left_coords, left_mask, original_coords, 
+            'left', trajectory_id_counter, G
+        )
+        all_trajectories.extend(left_trajectories)
+        trajectory_id_counter += len(left_trajectories)
+        
+        # Update combined DBSCAN stats
+        combined_results['dbscan']['n_clusters'] += left_results['dbscan']['n_clusters']
+        combined_results['dbscan']['noise_points'] += left_results['dbscan']['noise_points']
+        combined_results['dbscan']['cluster_sizes'].extend(left_results['dbscan']['cluster_sizes'])
+    
+    # Process right hemisphere results  
+    if right_results and 'trajectories' in right_results:
+        right_trajectories = process_hemisphere_trajectories(
+            right_results, right_coords, right_mask, original_coords,
+            'right', trajectory_id_counter, G
+        )
+        all_trajectories.extend(right_trajectories)
+        
+        # Update combined DBSCAN stats
+        combined_results['dbscan']['n_clusters'] += right_results['dbscan']['n_clusters']
+        combined_results['dbscan']['noise_points'] += right_results['dbscan']['noise_points']
+        combined_results['dbscan']['cluster_sizes'].extend(right_results['dbscan']['cluster_sizes'])
+    
+    # Finalize combined results
+    combined_results['trajectories'] = all_trajectories
+    combined_results['n_trajectories'] = len(all_trajectories)
+    combined_results['graph'] = G
+    
+    # Combine PCA stats
+    if left_results and 'pca_stats' in left_results:
+        combined_results['pca_stats'].extend(left_results['pca_stats'])
+    if right_results and 'pca_stats' in right_results:
+        combined_results['pca_stats'].extend(right_results['pca_stats'])
+    
+    # Add hemisphere info for debugging/reporting
+    combined_results['hemisphere_info'] = {
+        'left_trajectories': len([t for t in all_trajectories if t.get('hemisphere') == 'left']),
+        'right_trajectories': len([t for t in all_trajectories if t.get('hemisphere') == 'right']),
+        'left_electrodes': len(left_coords),
+        'right_electrodes': len(right_coords)
+    }
+    
+    return combined_results
+
+def process_hemisphere_trajectories(hemisphere_results, hemisphere_coords, 
+                                  hemisphere_mask, original_coords, hemisphere_name,
+                                  id_offset, unified_graph):
+    """
+    Process trajectories from one hemisphere and map them back to original coordinate space.
+    """
+    trajectories = []
+    
+    if 'graph' not in hemisphere_results:
+        return trajectories
+    
+    # Get the mapping from hemisphere coordinates back to original indices
+    original_indices = np.where(hemisphere_mask)[0]
+    
+    for traj in hemisphere_results['trajectories']:
+        # Create new trajectory with unified ID
+        new_traj = traj.copy()
+        new_traj['cluster_id'] = id_offset + traj['cluster_id']
+        new_traj['hemisphere'] = hemisphere_name
+        new_traj['original_hemisphere_id'] = traj['cluster_id']
+        
+        # Update graph nodes for this trajectory
+        hemisphere_graph = hemisphere_results['graph']
+        hemisphere_cluster_id = traj['cluster_id']
+        
+        # Find nodes in this cluster and update the unified graph
+        for node_data in hemisphere_graph.nodes(data=True):
+            node_id, node_attrs = node_data
+            if node_attrs.get('dbscan_cluster') == hemisphere_cluster_id:
+                # Map back to original coordinate index
+                original_node_id = original_indices[node_id]
+                unified_graph.nodes[original_node_id]['dbscan_cluster'] = new_traj['cluster_id']
+        
+        trajectories.append(new_traj)
+    
+    return trajectories
 #------------------------------------------------------------------------------
 # PART 3: VISUALIZATION FUNCTIONS
 #------------------------------------------------------------------------------
@@ -8173,11 +8901,11 @@ def main(use_combined_volume=True, use_original_reports=True,
         
         # Step 1: Load required volumes from Slicer
         print("Loading volumes from Slicer...")
-        electrodes_volume = slicer.util.getNode('P3_electrode_mask_success_1')
-        brain_volume = slicer.util.getNode("patient3_mask_5")
+        electrodes_volume = slicer.util.getNode('P5_electrode_mask_success_1')
+        brain_volume = slicer.util.getNode("patient5_mask_5")
         
         # Create output directories
-        base_dir = r"C:\Users\rocia\Downloads\TFG\Cohort\Centroids\P3_BoltHeadandpaths_trial_success_interactive"
+        base_dir = r"C:\Users\rocia\Downloads\TFG\Cohort\Centroids\P5_BoltHeadandpaths_trial_success_interactive_split_hemishhere"
         
         # NEW: Include hemisphere in output directory name
         output_dir_name = "trajectory_analysis_results"
@@ -8252,7 +8980,7 @@ def main(use_combined_volume=True, use_original_reports=True,
         combined_trajectories = {}
         if use_combined_volume:
             print("Performing combined volume analysis...")
-            combined_volume = slicer.util.getNode('P3_CombinedBoltHeadEntryPointsTrajectoryMask')
+            combined_volume = slicer.util.getNode('P5_CombinedBoltHeadEntryPointsTrajectoryMask')
             
             if combined_volume:
                 # Extract trajectories from combined volume
@@ -8298,7 +9026,7 @@ def main(use_combined_volume=True, use_original_reports=True,
         
         # Step 4: Get entry points if available and filter by hemisphere
         entry_points = None
-        entry_points_volume = slicer.util.getNode('P3_brain_entry_points')
+        entry_points_volume = slicer.util.getNode('P5_brain_entry_points')
         if entry_points_volume:
             all_entry_centroids_ras = get_all_centroids(entry_points_volume)
             if all_entry_centroids_ras:
@@ -8315,73 +9043,123 @@ def main(use_combined_volume=True, use_original_reports=True,
         if use_adaptive_clustering:
             print("Running trajectory analysis with adaptive clustering...")
             
-            # Run adaptive parameter search
-            parameter_search = adaptive_clustering_parameters(
-                coords_array=coords_array,
-                initial_eps=8,
-                initial_min_neighbors=3,
-                expected_contact_counts=expected_contact_counts,
-                max_iterations=max_iterations,
-                eps_step=0.5,
-                verbose=True
-            )
-            
-            optimal_eps = parameter_search['optimal_eps']
-            optimal_min_neighbors = parameter_search['optimal_min_neighbors']
-            
-            print(f"Found optimal parameters: eps={optimal_eps:.2f}, min_neighbors={optimal_min_neighbors}")
-            
-            # Run integrated trajectory analysis with optimal parameters and spacing validation
-            integrated_results = integrated_trajectory_analysis(
-                coords_array=coords_array,
-                entry_points=entry_points,
-                max_neighbor_distance=optimal_eps,
-                min_neighbors=optimal_min_neighbors,
-                expected_spacing_range=expected_spacing_range if validate_spacing else None
-            )
-            
-            # Store the optimal parameters in the results
-            all_results['adaptive_parameters'] = {
-                'optimal_eps': optimal_eps,
-                'optimal_min_neighbors': optimal_min_neighbors,
-                'score': parameter_search['score'],
-                'iterations': len(parameter_search['iterations_data'])
-            }
-            
-            # Save parameter search visualization
-            if use_original_reports:
-                # Create adaptive clustering subdirectory
-                adaptive_dir = os.path.join(output_dir, "adaptive_clustering")
-                os.makedirs(adaptive_dir, exist_ok=True)
+            # Check if we should analyze hemispheres separately
+            if hemisphere == 'both':
+                # Quick check: do we have significant electrodes in both hemispheres?
+                left_coords = coords_array[coords_array[:, 0] < 0]
+                right_coords = coords_array[coords_array[:, 0] > 0]
                 
-                # Save parameter search visualization
-                plt.figure(parameter_search['visualization'].number)
-                plt.savefig(os.path.join(adaptive_dir, 'adaptive_parameter_search.png'), dpi=300)
-                
-                # Save parameter search results to PDF
-                with PdfPages(os.path.join(adaptive_dir, 'adaptive_parameter_search.pdf')) as pdf:
-                    pdf.savefig(parameter_search['visualization'])
-                
-                # Create evolution visualization
-                evolution_vis = visualize_adaptive_clustering(
-                    coords_array,
-                    parameter_search['iterations_data'],
-                    expected_contact_counts,
-                    adaptive_dir
+                # If we have enough electrodes in both hemispheres, analyze separately
+                if len(left_coords) >= 10 and len(right_coords) >= 10:
+                    print(f"Detected bilateral electrodes (L:{len(left_coords)}, R:{len(right_coords)})")
+                    print("Using hemisphere-separated adaptive analysis...")
+                    
+                    # Use hemisphere separation WITH adaptive clustering
+                    integrated_results = analyze_both_hemispheres_separately(
+                        coords_array=coords_array,
+                        entry_points=entry_points,
+                        max_neighbor_distance=8,  # Initial value for adaptive search
+                        min_neighbors=3,
+                        expected_spacing_range=expected_spacing_range if validate_spacing else None,
+                        use_adaptive_clustering=True,  # Enable adaptive clustering
+                        expected_contact_counts=expected_contact_counts,
+                        max_iterations=max_iterations
+                    )
+                else:
+                    # Use regular adaptive analysis (your existing code)
+                    parameter_search = adaptive_clustering_parameters(
+                        coords_array=coords_array,
+                        initial_eps=8,
+                        initial_min_neighbors=3,
+                        expected_contact_counts=expected_contact_counts,
+                        max_iterations=max_iterations,
+                        eps_step=0.5,
+                        verbose=True
+                    )
+                    
+                    optimal_eps = parameter_search['optimal_eps']
+                    optimal_min_neighbors = parameter_search['optimal_min_neighbors']
+                    
+                    integrated_results = integrated_trajectory_analysis(
+                        coords_array=coords_array,
+                        entry_points=entry_points,
+                        max_neighbor_distance=optimal_eps,
+                        min_neighbors=optimal_min_neighbors,
+                        expected_spacing_range=expected_spacing_range if validate_spacing else None
+                    )
+                    
+                    integrated_results['parameter_search'] = parameter_search
+            else:
+                # Single hemisphere adaptive analysis (your existing code)
+                parameter_search = adaptive_clustering_parameters(
+                    coords_array=coords_array,
+                    initial_eps=8,
+                    initial_min_neighbors=3,
+                    expected_contact_counts=expected_contact_counts,
+                    max_iterations=max_iterations,
+                    eps_step=0.5,
+                    verbose=True
                 )
                 
-                print(f"✅ Adaptive clustering results saved to {adaptive_dir}")
+                optimal_eps = parameter_search['optimal_eps']
+                optimal_min_neighbors = parameter_search['optimal_min_neighbors']
                 
-            integrated_results['parameter_search'] = parameter_search
+                integrated_results = integrated_trajectory_analysis(
+                    coords_array=coords_array,
+                    entry_points=entry_points,
+                    max_neighbor_distance=optimal_eps,
+                    min_neighbors=optimal_min_neighbors,
+                    expected_spacing_range=expected_spacing_range if validate_spacing else None
+                )
+                
+                integrated_results['parameter_search'] = parameter_search
         else:
-            # Run the original enhanced integrated trajectory analysis with fixed parameters
-            print("Running integrated trajectory analysis with fixed parameters (eps=7.5, min_neighbors=3)...")
-            integrated_results = integrated_trajectory_analysis(
-                coords_array=coords_array,
-                entry_points=entry_points,
-                max_neighbor_distance=7.5,
-                min_neighbors=3,
-                expected_spacing_range=expected_spacing_range if validate_spacing else None
+            # Regular (non-adaptive) analysis
+            print("Running integrated trajectory analysis with fixed parameters...")
+            
+            # Check if we should analyze hemispheres separately
+            if hemisphere == 'both':
+                # Quick check: do we have significant electrodes in both hemispheres?
+                left_coords = coords_array[coords_array[:, 0] < 0]
+                right_coords = coords_array[coords_array[:, 0] > 0]
+                
+                # If we have enough electrodes in both hemispheres, analyze separately
+                if len(left_coords) >= 10 and len(right_coords) >= 10:
+                    print(f"Detected bilateral electrodes (L:{len(left_coords)}, R:{len(right_coords)})")
+                    print("Using hemisphere-separated analysis...")
+                    
+                    # Use hemisphere separation with fixed parameters
+                    integrated_results = analyze_both_hemispheres_separately(
+                        coords_array=coords_array,
+                        entry_points=entry_points,
+                        max_neighbor_distance=7.5,
+                        min_neighbors=3,
+                        expected_spacing_range=expected_spacing_range if validate_spacing else None,
+                        use_adaptive_clustering=False  # Use fixed parameters
+                    )
+                else:
+                    # Use regular analysis (your existing code)
+                    integrated_results = integrated_trajectory_analysis(
+                        coords_array=coords_array,
+                        entry_points=entry_points,
+                        max_neighbor_distance=7.5,
+                        min_neighbors=3,
+                        expected_spacing_range=expected_spacing_range if validate_spacing else None
+                    )
+            else:
+                # Single hemisphere analysis (your existing code)
+                integrated_results = integrated_trajectory_analysis(
+                    coords_array=coords_array,
+                    entry_points=entry_points,
+                    max_neighbor_distance=7.5,
+                    min_neighbors=3,
+                    expected_spacing_range=expected_spacing_range if validate_spacing else None
+                )
+
+        if hemisphere.lower() == 'both':
+            print("Applying hemisphere splitting for trajectories that cross the boundary (x=0)...")
+            integrated_results = apply_hemisphere_splitting_to_results(
+                integrated_results, coords_array, hemisphere
             )
 
         if analyze_contact_angles and 'trajectories' in integrated_results:
@@ -8602,7 +9380,7 @@ def main(use_combined_volume=True, use_original_reports=True,
         
         # Step 8: Get bolt directions and filter by hemisphere
         bolt_directions = None
-        bolt_head_volume = slicer.util.getNode('P3_bolt_heads')
+        bolt_head_volume = slicer.util.getNode('P5_bolt_heads')
         
         if bolt_head_volume and entry_points_volume:
             print("Extracting bolt-to-entry directions...")
@@ -9011,7 +9789,7 @@ if __name__ == "__main__":
         refine_trajectories=True,
         max_contacts_per_trajectory=18,
         validate_entry_angles=True,
-        hemisphere = 'left',               # Specify hemisphere for analysis
+        hemisphere = 'both',               # Specify hemisphere for analysis
         analyze_contact_angles=True,     # Enable contact angle analysis
         angle_threshold=40.0,             # Set threshold for flagging non-linear segments
         create_plotly_visualization=True, #  Enable Plotly visualization

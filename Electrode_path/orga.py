@@ -6786,13 +6786,8 @@ def extract_trajectory_features(trajectory, cluster_coords):
 
 def create_final_trajectory_report(coords_array, results, output_dir, create_interactive=True):
     """
-    Create final report with scoring table and 3D visualization
-    
-    Args:
-        coords_array: Array of electrode coordinates
-        results: Analysis results
-        output_dir: Output directory
-        create_interactive: Whether to create interactive Plotly visualization
+    UPDATED: Create final report with scoring table and 3D visualization
+    Now uses the fixed visualization functions
     """
     
     # Calculate scores
@@ -6804,7 +6799,7 @@ def create_final_trajectory_report(coords_array, results, output_dir, create_int
     scores_df.to_csv(csv_path, index=False)
     print(f"✅ Trajectory scores saved to: {csv_path}")
     
-    # Create 3D visualization with IDs and scores
+    # Create 3D visualization with IDs and scores - USING FIXED FUNCTION
     static_fig = create_scored_3d_visualization(coords_array, results, scores_df)
     
     # Save static visualization
@@ -6812,14 +6807,11 @@ def create_final_trajectory_report(coords_array, results, output_dir, create_int
     static_fig.savefig(static_viz_path, dpi=300, bbox_inches='tight')
     plt.close(static_fig)
     
-    # Create interactive visualization if requested
+    # Create interactive visualization if requested - USING FIXED FUNCTION
     interactive_viz_path = None
     if create_interactive:
         try:
-            import plotly.graph_objects as go
-            import plotly.express as px
-            
-            # Create interactive 3D plot
+            # Create interactive 3D plot - USING FIXED FUNCTION
             interactive_fig = create_interactive_scored_3d_visualization(coords_array, results, scores_df)
             
             if interactive_fig is not None:
@@ -6852,7 +6844,8 @@ def create_final_trajectory_report(coords_array, results, output_dir, create_int
 ##### interactive visualization
 def create_interactive_scored_3d_visualization(coords_array, results, scores_df):
     """
-    Create interactive 3D Plotly plot with trajectory IDs and algorithm scores
+    FIXED VERSION: Create interactive 3D Plotly plot with trajectory IDs and algorithm scores
+    Now properly handles split trajectories
     """
     try:
         import plotly.graph_objects as go
@@ -6886,18 +6879,19 @@ def create_interactive_scored_3d_visualization(coords_array, results, scores_df)
         scores_dict = dict(zip(scores_df['trajectory_id'], scores_df['algorithm_score']))
         
         # Plot each trajectory with color coding
+        trajectories_plotted = 0
         for _, row in scores_df.iterrows():
             traj_id = row['trajectory_id']
             score = row['algorithm_score']
             
-            # Get coordinates for this trajectory
-            mask = clusters == traj_id
-            if not np.any(mask):
-                continue
-                
-            cluster_coords = coords_array[mask]
+            # FIXED: Get coordinates using the new helper function
+            cluster_coords = get_trajectory_coordinates(traj_id, results, coords_array, clusters)
             
-            # Color based on score: red (bad) -> yellow (ok) -> green (good)
+            if cluster_coords is None or len(cluster_coords) == 0:
+                print(f"Warning: No coordinates found for trajectory {traj_id}")
+                continue
+            
+            # Color based on score
             if score >= 80:
                 color = 'green'
                 marker_symbol = 'circle'
@@ -6951,11 +6945,13 @@ def create_interactive_scored_3d_visualization(coords_array, results, scores_df)
                 legendgroup=quality,
                 showlegend=True
             ))
+            
+            trajectories_plotted += 1
         
         # Update layout for better visualization
         fig.update_layout(
             title={
-                'text': 'Interactive 3D Trajectory Quality Scores<br>' +
+                'text': f'Interactive 3D Trajectory Quality Scores ({trajectories_plotted}/{len(scores_df)} plotted)<br>' +
                         '<sub>Green=Good (≥80), Orange=OK (60-79), Red=Bad (<60)</sub>',
                 'x': 0.5,
                 'font': {'size': 16}
@@ -6984,6 +6980,7 @@ def create_interactive_scored_3d_visualization(coords_array, results, scores_df)
             xref='paper', yref='paper',
             text=f"<b>Quality Summary:</b><br>" +
                  f"Total: {len(scores_df)} trajectories<br>" +
+                 f"Plotted: {trajectories_plotted}<br>" +
                  f"🟢 Good (≥80): {good_count}<br>" +
                  f"🟠 OK (60-79): {ok_count}<br>" +
                  f"🔴 Bad (<60): {bad_count}<br>" +
@@ -7005,9 +7002,68 @@ def create_interactive_scored_3d_visualization(coords_array, results, scores_df)
         print(f"Error creating interactive visualization: {e}")
         return None
 
+
+def get_trajectory_coordinates(traj_id, results, coords_array, clusters):
+    """
+    FIXED: Get coordinates for any trajectory type (regular or split)
+    
+    Args:
+        traj_id: Trajectory ID (can be int, string, or split format like "S1_1")
+        results: Analysis results dictionary
+        coords_array: Array of all coordinates
+        clusters: Array of cluster assignments
+        
+    Returns:
+        numpy.ndarray: Coordinates for the trajectory, or None if not found
+    """
+    
+    # Method 1: Try to find in results.trajectories (works for all types)
+    for traj in results.get('trajectories', []):
+        if str(traj['cluster_id']) == str(traj_id):
+            if 'sorted_coords' in traj:
+                return np.array(traj['sorted_coords'])
+            break
+    
+    # Method 2: For integer-like IDs, try cluster mapping
+    if isinstance(traj_id, (int, np.integer)) or (isinstance(traj_id, str) and traj_id.isdigit()):
+        try:
+            cluster_id_int = int(traj_id)
+            mask = clusters == cluster_id_int
+            if np.any(mask):
+                return coords_array[mask]
+        except (ValueError, TypeError):
+            pass
+    
+    # Method 3: For split IDs, try to find the original trajectory data
+    if isinstance(traj_id, str) and ('S' in traj_id or 'M' in traj_id):
+        # This is a split or merged trajectory, coordinates should be in sorted_coords
+        for traj in results.get('trajectories', []):
+            if str(traj['cluster_id']) == str(traj_id):
+                # Try different coordinate fields
+                for coord_field in ['sorted_coords', 'coordinates', 'points']:
+                    if coord_field in traj and traj[coord_field]:
+                        return np.array(traj[coord_field])
+                
+                # If no coordinate fields, try to reconstruct from endpoints
+                if 'endpoints' in traj:
+                    endpoints = np.array(traj['endpoints'])
+                    if len(endpoints) == 2:
+                        # Create a simple line between endpoints
+                        n_points = traj.get('electrode_count', 10)
+                        t = np.linspace(0, 1, n_points)
+                        coords = []
+                        for i in range(n_points):
+                            point = endpoints[0] + t[i] * (endpoints[1] - endpoints[0])
+                            coords.append(point)
+                        return np.array(coords)
+                break
+    
+    return None
+
 def create_scored_3d_visualization(coords_array, results, scores_df):
     """
-    Create 3D plot with trajectory IDs and algorithm scores
+    FIXED VERSION: Create 3D plot with trajectory IDs and algorithm scores
+    Now properly handles split trajectories (S1_1, S2_1, etc.)
     """
     fig = plt.figure(figsize=(16, 12))
     ax = fig.add_subplot(111, projection='3d')
@@ -7023,16 +7079,17 @@ def create_scored_3d_visualization(coords_array, results, scores_df):
     scores_dict = dict(zip(scores_df['trajectory_id'], scores_df['algorithm_score']))
     
     # Plot each trajectory with color coding
+    trajectories_plotted = 0
     for _, row in scores_df.iterrows():
         traj_id = row['trajectory_id']
         score = row['algorithm_score']
         
-        # Get coordinates for this trajectory
-        mask = clusters == traj_id
-        if not np.any(mask):
+        # FIXED: Get coordinates using the correct method for each trajectory type
+        cluster_coords = get_trajectory_coordinates(traj_id, results, coords_array, clusters)
+        
+        if cluster_coords is None or len(cluster_coords) == 0:
+            print(f"Warning: No coordinates found for trajectory {traj_id}")
             continue
-            
-        cluster_coords = coords_array[mask]
         
         # Color based on score: red (bad) -> yellow (ok) -> green (good)
         if score >= 80:
@@ -7054,17 +7111,8 @@ def create_scored_3d_visualization(coords_array, results, scores_df):
         
         # Add trajectory line
         if len(cluster_coords) > 1:
-            # Sort points along trajectory if we have direction info
-            trajectory = next((t for t in results['trajectories'] if t['cluster_id'] == traj_id), None)
-            if trajectory and 'direction' in trajectory:
-                direction = np.array(trajectory['direction'])
-                center = np.mean(cluster_coords, axis=0)
-                projected = np.dot(cluster_coords - center, direction)
-                sorted_indices = np.argsort(projected)
-                sorted_coords = cluster_coords[sorted_indices]
-                
-                ax.plot(sorted_coords[:, 0], sorted_coords[:, 1], sorted_coords[:, 2],
-                       '-', color=color, linewidth=2, alpha=0.6)
+            ax.plot(cluster_coords[:, 0], cluster_coords[:, 1], cluster_coords[:, 2],
+                   '-', color=color, linewidth=2, alpha=0.6)
         
         # Add label with ID and score
         centroid = np.mean(cluster_coords, axis=0)
@@ -7072,12 +7120,14 @@ def create_scored_3d_visualization(coords_array, results, scores_df):
                f'ID:{traj_id}\nScore:{score:.0f}', 
                fontsize=8, ha='center', va='center',
                bbox=dict(boxstyle='round,pad=0.3', facecolor='white', alpha=0.8))
+        
+        trajectories_plotted += 1
     
     # Styling
     ax.set_xlabel('X (mm)')
     ax.set_ylabel('Y (mm)') 
     ax.set_zlabel('Z (mm)')
-    ax.set_title('Trajectory Quality Scores (Green=Good, Orange=OK, Red=Bad)')
+    ax.set_title(f'Trajectory Quality Scores ({trajectories_plotted}/{len(scores_df)} plotted)\n(Green=Good, Orange=OK, Red=Bad)')
     
     # Add legend
     from matplotlib.lines import Line2D
@@ -7090,6 +7140,7 @@ def create_scored_3d_visualization(coords_array, results, scores_df):
     
     plt.tight_layout()
     return fig
+
 
 def create_interactive_annotation_report(scores_df, static_viz_path, html_path, interactive_viz_path=None):
     """
@@ -8905,7 +8956,7 @@ def main(use_combined_volume=True, use_original_reports=True,
         brain_volume = slicer.util.getNode("patient5_mask_5")
         
         # Create output directories
-        base_dir = r"C:\Users\rocia\Downloads\TFG\Cohort\Centroids\P5_BoltHeadandpaths_trial_success_interactive_split_hemishhere"
+        base_dir = r"C:\Users\rocia\Downloads\TFG\Cohort\Centroids\P5_BoltHeadandpaths_trial_success_interactive_split_hemishhere_enhanced"
         
         # NEW: Include hemisphere in output directory name
         output_dir_name = "trajectory_analysis_results"
