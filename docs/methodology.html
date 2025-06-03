@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Methodology - SEEG Electrode Localization</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        header {
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(10px);
+            border-radius: 20px;
+            padding: 30px;
+            margin-bottom: 30px;
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1);
+            text-align: center;
+        }
+
+        .back-nav {
+            background: #3498db;
+            color: white;
+            padding: 10px 20px;
+            border-radius: 25px;
+            text-decoration: none;
+            display: inline-block;
+            margin-bottom: 20px;
+            transition: all 0.3s ease;
+        }
+
+        .back-nav:hover {
+            background: #2980b9;
+            transform: scale(1.05);
+        }
+
+        .pipeline-stage {
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(10px);
+            border-radius: 15px;
+            padding: 30px;
+            margin-bottom: 20px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
+        }
+
+        .stage-header {
+            display: flex;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+
+        .stage-number {
+            background: linear-gradient(45deg, #667eea, #764ba2);
+            color: white;
+            width: 50px;
+            height: 50px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            font-size: 1.5em;
+            margin-right: 20px;
+        }
+
+        .pipeline-diagram {
+            text-align: center;
+            margin: 30px 0;
+            padding: 20px;
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 15px;
+        }
+
+        .pipeline-arrow {
+            font-size: 2em;
+            color: #3498db;
+            margin: 10px 0;
+        }
+
+        .code-block {
+            background: #2c3e50;
+            color: #ecf0f1;
+            padding: 15px;
+            border-radius: 10px;
+            font-family: 'Courier New', monospace;
+            margin: 15px 0;
+            overflow-x: auto;
+        }
+
+        .tech-highlight {
+            background: linear-gradient(45deg, #ff6b6b, #feca57);
+            color: white;
+            padding: 5px 10px;
+            border-radius: 15px;
+            font-weight: bold;
+            display: inline-block;
+            margin: 2px;
+        }
+
+        .performance-box {
+            background: linear-gradient(45deg, #00b894, #00cec9);
+            color: white;
+            padding: 15px;
+            border-radius: 10px;
+            margin: 15px 0;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <a href="index.html" class="back-nav">← Back to Home</a>
+            <h1>🔬 Methodology</h1>
+            <p>Six-Stage Automated Pipeline for SEEG Electrode Localization</p>
+        </header>
+
+        <div class="pipeline-diagram">
+            <h2>🏗️ Complete Pipeline Architecture</h2>
+            <div style="font-size: 1.2em; margin: 20px 0;">
+                <strong>Input:</strong> Post-operative CT Scan<br>
+                <div class="pipeline-arrow">⬇️</div>
+                <strong>Processing Time:</strong> ~30 minutes<br>
+                <div class="pipeline-arrow">⬇️</div>
+                <strong>Output:</strong> Validated Electrode Coordinates + Trajectories
+            </div>
+        </div>
+
+        <div class="pipeline-stage">
+            <div class="stage-header">
+                <div class="stage-number">1</div>
+                <div>
+                    <h2>Brain Region Extraction</h2>
+                    <span class="tech-highlight">3D U-Net</span>
+                    <span class="tech-highlight">MONAI</span>
+                </div>
+            </div>
+            <p><strong>Goal:</strong> Automatically segment brain tissue from post-operative CT scans to provide anatomical constraints.</p>
+            <div class="code-block">
+# MONAI-based 3D U-Net Architecture
+- Input: CT volume (256³, 1mm isotropic)
+- Output: Binary brain mask
+- Performance: 0.936 ± 0.011 Dice coefficient</div>
+            <div class="performance-box">
+                <strong>✅ Result:</strong> 96.9% variance reduction, eliminates extra-cranial false positives
+            </div>
+        </div>
+
+        <div class="pipeline-stage">
+            <div class="stage-header">
+                <div class="stage-number">2</div>
+                <div>
+                    <h2>Multi-Modal Image Enhancement</h2>
+                    <span class="tech-highlight">7 Approaches</span>
+                    <span class="tech-highlight">Artifact Reduction</span>
+                </div>
+            </div>
+            <p><strong>Goal:</strong> Improve electrode visibility through complementary enhancement strategies.</p>
+            <div class="code-block">
+Enhancement Methods:
+• ROI + Gamma (93.0% improvement)
+• Wavelet Denoising (31.9% improvement)
+• Morphological Processing
+• CLAHE + Gaussian Filtering</div>
+            <div class="performance-box">
+                <strong>✅ Result:</strong> Robust electrode detection across diverse imaging conditions
+            </div>
+        </div>
+
+        <div class="pipeline-stage">
+            <div class="stage-header">
+                <div class="stage-number">3</div>
+                <div>
+                    <h2>Intelligent Threshold Prediction</h2>
+                    <span class="tech-highlight">Random Forest</span>
+                    <span class="tech-highlight">38 Features</span>
+                </div>
+            </div>
+            <p><strong>Goal:</strong> Predict optimal binarization thresholds using machine learning.</p>
+            <div class="code-block">
+# Feature Engineering
+- 23 histogram-derived metrics
+- 15 engineered features
+- R² = 0.99 prediction accuracy</div>
+            <div class="performance-box">
+                <strong>✅ Result:</strong> Eliminates manual parameter tuning, adapts to patient-specific imaging
+            </div>
+        </div>
+
+        <div class="pipeline-stage">
+            <div class="stage-header">
+                <div class="stage-number">4</div>
+                <div>
+                    <h2>Global Voting Ensemble</h2>
+                    <span class="tech-highlight">38 Mask Variants</span>
+                    <span class="tech-highlight">Consensus</span>
+                </div>
+            </div>
+            <p><strong>Goal:</strong> Create robust segmentation through ensemble consensus voting.</p>
+            <div class="code-block">
+# Ensemble Strategy
+- Generate 38 binary masks per patient
+- Quality-weighted voting mechanism
+- Optimal performance with just 2-3 masks
+- 94.7% computational reduction</div>
+            <div class="performance-box">
+                <strong>✅ Result:</strong> Redundant coverage ensures no electrode is missed due to individual method failures
+            </div>
+        </div>
+
+        <div class="pipeline-stage">
+            <div class="stage-header">
+                <div class="stage-number">5</div>
+                <div>
+                    <h2>Contact Authentication</h2>
+                    <span class="tech-highlight">LightGBM</span>
+                    <span class="tech-highlight">Confidence Scoring</span>
+                </div>
+            </div>
+            <p><strong>Goal:</strong> Distinguish genuine electrode contacts from imaging artifacts using regression-based confidence scoring.</p>
+            <div class="code-block">
+# Multi-Domain Feature Space (38D)
+- Spatial coordinates & organization
+- Local neighborhood relationships  
+- Physical intensity signatures
+- Geometric consistency & trajectory alignment
+- Anatomical plausibility constraints</div>
+            <div class="performance-box">
+                <strong>✅ Result:</strong> 100% perfect top-N selection, graduated confidence for clinical decision-making
+            </div>
+        </div>
+
+        <div class="pipeline-stage">
+            <div class="stage-header">
+                <div class="stage-number">6</div>
+                <div>
+                    <h2>Trajectory Reconstruction</h2>
+                    <span class="tech-highlight">DBSCAN</span>
+                    <span class="tech-highlight">Louvain</span>
+                </div>
+            </div>
+            <p><strong>Goal:</strong> Reconstruct complete electrode pathways using multi-algorithm consensus.</p>
+            <div class="code-block">
+# Novel Consensus Framework
+- DBSCAN spatial clustering (ε=7.5mm)
+- Louvain community detection validation
+- Adaptive parameter optimization
+- Geometric & clinical constraint validation</div>
+            <div class="performance-box">
+                <strong>✅ Result:</strong> Handles electrode bending, missing data, and intelligent trajectory merging
+            </div>
+        </div>
+
+        <div class="pipeline-stage">
+            <h2>🎯 Clinical Innovation: Human-Machine Collaboration</h2>
+            <p>Unlike rigid binary classification, our system provides <strong>graduated confidence scores</strong> that preserve clinical decision-making flexibility:</p>
+            <div class="code-block">
+High Confidence (>60%): Direct clinical use
+Medium Confidence (20-60%): Clinical review recommended  
+Low Confidence (<20%): Manual validation required </div>
+            <p style="margin-top: 15px;"><strong>Key Insight:</strong> Even 20-30% confidence predictions often correspond to clinically acceptable electrode localizations, enabling a tiered workflow that adapts to patient complexity and clinical urgency.</p>
+        </div>
+
+        <footer style="text-align: center; margin-top: 40px;">
+            <a href="index.html" class="back-nav">← Back to Home</a>
+            <a href="results.html" class="back-nav" style="background: #e74c3c;">View Results →</a>
+        </footer>
+    </div>
+</body>
+</html>
