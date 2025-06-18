@@ -2,11 +2,13 @@
 
 ![image](https://github.com/user-attachments/assets/be33d580-feb4-4caa-9a48-30ebd59ee7e1)
 ![image](https://github.com/user-attachments/assets/4e0f3fa7-2de5-4efc-b5d4-10d8878caf77)
-<video controls width="100%" autoplay muted loop>
-  <source src="https://raw.githubusercontent.com/rociavl/SEEG_automatic_segmentation/main/docs/trajectories.mp4" type="video/mp4">
-  Your browser does not support the video tag.
-</video>
-The video demonstrates real-time electrode detection, trajectory reconstruction, and quality assessment with interactive 3D visualization.
+<p align="center">
+  <a href="https://www.youtube.com/watch?v=mSGtHaBInJM">
+    <img src="https://img.youtube.com/vi/mSGtHaBInJM/0.jpg" alt="Watch the demo video" width="70%">
+  </a>
+  <br>
+  <b>🎥 Click the image to watch the SEEG trajectory demo</b>
+</p>
 
 
 A comprehensive 3D Slicer extension for automated localization of Stereoelectroencephalography (SEEG) electrode contacts in post-operative CT scans. This system transforms the manual electrode localization process from 4+ hours to 30 minutes while maintaining clinical accuracy standards.
