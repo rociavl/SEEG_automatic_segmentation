@@ -1,6 +1,8 @@
 ﻿# SEEG_automatic_segmentation
 
 ![image](https://github.com/user-attachments/assets/be33d580-feb4-4caa-9a48-30ebd59ee7e1)
+![image](https://github.com/user-attachments/assets/4e0f3fa7-2de5-4efc-b5d4-10d8878caf77)
+
 
 A comprehensive 3D Slicer extension for automated localization of Stereoelectroencephalography (SEEG) electrode contacts in post-operative CT scans. This system transforms the manual electrode localization process from 4+ hours to 30 minutes while maintaining clinical accuracy standards.
 
