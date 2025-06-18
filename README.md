@@ -3,7 +3,7 @@
 ![image](https://github.com/user-attachments/assets/be33d580-feb4-4caa-9a48-30ebd59ee7e1)
 ![image](https://github.com/user-attachments/assets/4e0f3fa7-2de5-4efc-b5d4-10d8878caf77)
 <video controls width="100%" autoplay muted loop>
-  <source src="docs/trajectories.mp4" type="video/mp4">
+  <source src="https://raw.githubusercontent.com/rociavl/SEEG_automatic_segmentation/main/docs/trajectories.mp4" type="video/mp4">
   Your browser does not support the video tag.
 </video>
 The video demonstrates real-time electrode detection, trajectory reconstruction, and quality assessment with interactive 3D visualization.
