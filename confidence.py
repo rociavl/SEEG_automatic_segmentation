@@ -61,7 +61,7 @@ class ConfidenceThresholdViewer(QWidget):
                 self.markupNode.AddFiducial(x, y, z)
 
 # === Path  CSV ===
-csv_path = r"C:\Users\rocia\Downloads\PREDICTIONS\P4_PREDICTIONS\patient_LOO_Ensemble_P4_top_predictions_mask_20.csv"
+csv_path = r"C:\Users\rocia\Documents\SEEG_Results\STITCH\Confidence_Analysis\confidence_predictions_CTp.3D.csv"
 
 # === Run the interactive viewer ===
 confidenceViewer = ConfidenceThresholdViewer(csv_path)

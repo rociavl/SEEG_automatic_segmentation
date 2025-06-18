@@ -1,6 +1,5 @@
 """
 CLEAN MODEL PREDICTION FOR SLICER
-No Optuna, no training code, just prediction!
 lightgbm required
 """
 
@@ -10,7 +9,7 @@ import joblib
 import warnings
 warnings.filterwarnings('ignore')
 
-# Essential imports only (no Optuna!)
+# Essential imports
 from sklearn.preprocessing import StandardScaler, OneHotEncoder
 from sklearn.pipeline import Pipeline
 from sklearn.compose import ColumnTransformer
@@ -194,15 +193,15 @@ def predict_electrode_confidence_no_optuna(
         raise
 
 # Your exact paths
-csv_path = r"C:\Users\rocia\Downloads\TFG\Cohort\Extension\Feature_Extraction\P8_mask_20\target_features_P8_mask_20.csv"
-model_path = r"C:\Users\rocia\Downloads\patient_leave_one_out_ensemble_optuna_wo_P8.joblib"
+csv_path = r"C:\Users\rocia\Downloads\TFG\Cohort\Extension\P1_Feature_Extraction\P1_mask_0\target_features_P1_mask_0.csv"
+model_path = r"C:\Users\rocia\AppData\Local\slicer.org\Slicer 5.6.2\SEEG_module\SEEG_masking\Models\patient_leave_one_out_ensemble.joblib"
 
 # Run prediction with your paths
 results_df = predict_electrode_confidence_no_optuna(
     feature_csv_path=csv_path,
     model_path=model_path,
-    patient_id="P8",
-    output_path=r"C:\Users\rocia\Downloads\TFG\Cohort\Extension\P8_predictions.csv"
+    patient_id="P1",
+    output_path=r"C:\Users\rocia\Downloads\TFG\Cohort\Extension\P1_trial_model\P1_predictions.csv"
 )
 
 print(f"✅ Prediction complete!")

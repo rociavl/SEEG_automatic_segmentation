@@ -599,11 +599,11 @@ def extract_features_multiple_files(
 if __name__ == "__main__":
         # Multiple files processing (your original workflow)
         individual_dfs, combined_df = extract_features_multiple_files(
-            results_file_folders=r"C:\Users\rocia\Downloads\TFG\Cohort\Models\Centroids_model\DATA\P8\P8_RESULTS\m_g",
-            patient_id="P8",
-            output_base_dir=r"C:\Users\rocia\Downloads\TFG\Cohort\Extension\Feature_Extraction",
-            ct_file=r"C:\Users\rocia\Downloads\TFG\Cohort\Enhance_ctp_tests\p8\TH45_histograms_FILTERED\Filtered_roi_volume_8_CTp.3D.nrrd",
-            roi_file_path=r"C:\Users\rocia\Downloads\TFG\Cohort\Models\Model_brain_mask\Dataset\MASK\patient8_mask_5.nrrd"
+            results_file_folders=r"C:\Users\rocia\Downloads\TFG\Cohort\Models\Centroids_model\DATA\P1\P1_results\P1_ml",
+            patient_id="P1",
+            output_base_dir=r"C:\Users\rocia\Downloads\TFG\Cohort\Extension\P1_Feature_Extraction",
+            ct_file=r"C:\Users\rocia\Downloads\TFG\Cohort\Enhance_ctp_tests\P1\TH45_histograms_ml_outliers_wo_P1_faster\Filtered_roi_volume_ctp.3D.nrrd",
+            roi_file_path=r"C:\Users\rocia\Downloads\TFG\Cohort\Models\Model_brain_mask\Dataset\MASK\patient1_mask_5.nrrd"
         )
 
 #exec(open(r'C:\Users\rocia\AppData\Local\slicer.org\Slicer 5.6.2\SEEG_module\SEEG_masking\Centroids_pipeline\centroids_feature_extraction.py').read())

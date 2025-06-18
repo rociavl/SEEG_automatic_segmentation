@@ -3656,29 +3656,18 @@ def check_merge_compatibility(traj1, traj2, max_distance=15, max_angle_diff=20):
 
 def merge_trajectories(traj1, traj2):
     """
-    Merge two trajectories into one.
-    
-    Args:
-        traj1, traj2: Trajectory dictionaries
-        
-    Returns:
-        dict: Merged trajectory
+    FIXED VERSION: Merge two trajectories into one with proper coordinate reconstruction.
     """
-    # Create a new trajectory 
     merged_traj = traj1.copy()
     
-    # Set new ID
-    merged_traj['cluster_id'] = traj1['cluster_id']  # Keep using the first trajectory's ID
-    
-    # Store original IDs in metadata instead of in the ID itself
+    # Use string-based ID like original code for better tracking
+    merged_traj['cluster_id'] = f"M_{traj1['cluster_id']}_{traj2['cluster_id']}"
     merged_traj['merged_from'] = [traj1['cluster_id'], traj2['cluster_id']]
     merged_traj['is_merged'] = True
     
-    # Get endpoints
     endpoints1 = np.array(traj1['endpoints'])
     endpoints2 = np.array(traj2['endpoints'])
     
-    # Calculate distances between all endpoint combinations
     distances = [
         (0, 0, np.linalg.norm(endpoints1[0] - endpoints2[0])),
         (0, 1, np.linalg.norm(endpoints1[0] - endpoints2[1])),
@@ -3686,23 +3675,53 @@ def merge_trajectories(traj1, traj2):
         (1, 1, np.linalg.norm(endpoints1[1] - endpoints2[1]))
     ]
     
-    # Find which endpoints are closest
     closest_pair = min(distances, key=lambda x: x[2])
     idx1, idx2, _ = closest_pair
     
-    # Update endpoints to span the full merged trajectory
+    # Update endpoints
     if idx1 == 0 and idx2 == 0:
         new_endpoints = [endpoints1[1], endpoints2[1]]
     elif idx1 == 0 and idx2 == 1:
         new_endpoints = [endpoints1[1], endpoints2[0]]
     elif idx1 == 1 and idx2 == 0:
         new_endpoints = [endpoints1[0], endpoints2[1]]
-    else:  # idx1 == 1 and idx2 == 1
+    else:
         new_endpoints = [endpoints1[0], endpoints2[0]]
     
     merged_traj['endpoints'] = [new_endpoints[0].tolist(), new_endpoints[1].tolist()]
     
-    # Recalculate direction and length
+    # *** CRITICAL FIX: Combine sorted coordinates ***
+    if 'sorted_coords' in traj1 and 'sorted_coords' in traj2:
+        coords1 = np.array(traj1['sorted_coords'])
+        coords2 = np.array(traj2['sorted_coords'])
+        
+        # Combine coordinates based on closest endpoint pairing
+        if idx1 == 0 and idx2 == 0:
+            # Connect end1[0] to end2[0], so reverse traj1 and keep traj2 normal
+            sorted_coords = np.vstack([coords1[::-1], coords2])
+        elif idx1 == 0 and idx2 == 1:
+            # Connect end1[0] to end2[1], so reverse both
+            sorted_coords = np.vstack([coords1[::-1], coords2[::-1]])
+        elif idx1 == 1 and idx2 == 0:
+            # Connect end1[1] to end2[0], so keep both normal
+            sorted_coords = np.vstack([coords1, coords2])
+        else:  # idx1 == 1 and idx2 == 1
+            # Connect end1[1] to end2[1], so keep traj1 normal and reverse traj2
+            sorted_coords = np.vstack([coords1, coords2[::-1]])
+            
+        merged_traj['sorted_coords'] = sorted_coords.tolist()
+    else:
+        # Fallback: try to reconstruct from endpoints
+        print(f"Warning: Missing sorted_coords for merge, using endpoint interpolation")
+        n_contacts = traj1['electrode_count'] + traj2['electrode_count']
+        t = np.linspace(0, 1, n_contacts)
+        interpolated_coords = []
+        for i in range(n_contacts):
+            point = new_endpoints[0] + t[i] * (new_endpoints[1] - new_endpoints[0])
+            interpolated_coords.append(point.tolist())
+        merged_traj['sorted_coords'] = interpolated_coords
+    
+    # Update other properties
     new_direction = new_endpoints[1] - new_endpoints[0]
     new_length = np.linalg.norm(new_direction)
     
@@ -3711,44 +3730,86 @@ def merge_trajectories(traj1, traj2):
     merged_traj['electrode_count'] = traj1['electrode_count'] + traj2['electrode_count']
     merged_traj['center'] = ((new_endpoints[0] + new_endpoints[1]) / 2).tolist()
     
-    # Mark as merged and record original trajectories
-    merged_traj['merged_from'] = [traj1['cluster_id'], traj2['cluster_id']]
-    
     return merged_traj
+
+def get_trajectory_coordinates(traj_id, results, coords_array, clusters):
+    """
+    IMPROVED VERSION: Get coordinates for any trajectory type with better fallbacks.
+    """
+    # Method 1: Check if trajectory has sorted_coords (for merged/split trajectories)
+    for traj in results.get('trajectories', []):
+        if str(traj['cluster_id']) == str(traj_id):
+            if 'sorted_coords' in traj and traj['sorted_coords']:
+                return np.array(traj['sorted_coords'])
+            break
+    
+    # Method 2: For regular cluster IDs, try cluster mapping
+    if isinstance(traj_id, (int, np.integer)) or (isinstance(traj_id, str) and traj_id.isdigit()):
+        try:
+            cluster_id_int = int(traj_id)
+            mask = clusters == cluster_id_int
+            if np.any(mask):
+                return coords_array[mask]
+        except (ValueError, TypeError):
+            pass
+    
+    # Method 3: For merged trajectories (M_X_Y format), try to extract original IDs
+    if isinstance(traj_id, str) and traj_id.startswith('M_'):
+        try:
+            parts = traj_id.replace('M_', '').split('_')
+            if len(parts) >= 2:
+                orig_id1, orig_id2 = int(parts[0]), int(parts[1])
+                mask1 = clusters == orig_id1
+                mask2 = clusters == orig_id2
+                if np.any(mask1) and np.any(mask2):
+                    # Return combined coordinates
+                    coords1 = coords_array[mask1]
+                    coords2 = coords_array[mask2]
+                    return np.vstack([coords1, coords2])
+        except (ValueError, TypeError):
+            pass
+    
+    # Method 4: For split trajectories, try to reconstruct from endpoints
+    for traj in results.get('trajectories', []):
+        if str(traj['cluster_id']) == str(traj_id):
+            if 'endpoints' in traj:
+                endpoints = np.array(traj['endpoints'])
+                if len(endpoints) == 2:
+                    # Create a simple line between endpoints
+                    n_points = traj.get('electrode_count', 10)
+                    t = np.linspace(0, 1, n_points)
+                    coords = []
+                    for i in range(n_points):
+                        point = endpoints[0] + t[i] * (endpoints[1] - endpoints[0])
+                        coords.append(point)
+                    return np.array(coords)
+            break
+    
+    print(f"Warning: Could not find coordinates for trajectory {traj_id}")
+    return None
 
 def split_trajectory(traj, expected_contact_counts=[5, 8, 10, 12, 15, 18]):
     """
-    Split a trajectory that may contain multiple electrodes.
-    
-    Args:
-        traj: Trajectory dictionary
-        expected_contact_counts: List of expected electrode contact counts
-        
-    Returns:
-        dict: Split results with success flag and trajectories
+    FIXED VERSION: Split a trajectory that may contain multiple electrodes.
+    Now properly generates string-based IDs and ensures sorted_coords are available.
     """
-    # Need coordinates for this trajectory
-    if 'sorted_coords' not in traj:
+    if 'sorted_coords' not in traj or not traj['sorted_coords']:
         return {'success': False, 'reason': 'No coordinates available', 'trajectories': [traj]}
     
     coords = np.array(traj['sorted_coords'])
-    
-    # Try to determine how many sub-trajectories to create
     contact_count = traj['electrode_count']
     
-    # Find potential combinations of expected counts that would sum close to our count
+    # Find potential combinations of expected counts
     best_combination = None
     min_difference = float('inf')
     
-    # Try combinations of 2 trajectories
     for count1 in expected_contact_counts:
         for count2 in expected_contact_counts:
             if abs((count1 + count2) - contact_count) < min_difference:
                 min_difference = abs((count1 + count2) - contact_count)
                 best_combination = [count1, count2]
     
-    # If needed, try combinations of 3 trajectories
-    if min_difference > 0 and contact_count>20:  
+    if min_difference > 0 and contact_count > 20:
         for count1 in expected_contact_counts:
             for count2 in expected_contact_counts:
                 for count3 in expected_contact_counts:
@@ -3757,120 +3818,83 @@ def split_trajectory(traj, expected_contact_counts=[5, 8, 10, 12, 15, 18]):
                         min_difference = diff
                         best_combination = [count1, count2, count3]
     
-    # No good combination found
     if best_combination is None or min_difference > 5:
         return {'success': False, 'reason': 'No good contact count combination found', 'trajectories': [traj]}
     
-    # Determine if we should use DBSCAN or K-means for splitting
-    if len(best_combination) <= 2:
-        # For 2 clusters, try DBSCAN with adjusted parameters
-        from sklearn.cluster import DBSCAN
-        
-        # Estimate good eps value based on contact spacing
-        if len(coords) > 1:
-            distances = np.linalg.norm(np.diff(coords, axis=0), axis=1)
-            median_spacing = np.median(distances)
-            splitting_eps = median_spacing * 1.5  # A bit larger than typical spacing
-        else:
-            splitting_eps = 5.0  # Default if we can't estimate
-        
-        # Apply DBSCAN
-        splitter = DBSCAN(eps=splitting_eps, min_samples=3)
-        labels = splitter.fit_predict(coords)
-        
-        # Check if splitting produced meaningful results
-        unique_labels = set(labels)
-        if -1 in unique_labels:
-            unique_labels.remove(-1)
-            
-        if len(unique_labels) < 2:
-            # DBSCAN failed, try K-means as backup
-            use_kmeans = True
-        else:
-            use_kmeans = False
-    else:
-        # For 3+ clusters, use K-means directly
-        use_kmeans = True
+    # Apply clustering to split
+    from sklearn.cluster import KMeans
     
-    # Apply K-means if needed
-    if use_kmeans:
-        from sklearn.cluster import KMeans
-        
-        n_clusters = len(best_combination)
-        splitter = KMeans(n_clusters=n_clusters)
-        labels = splitter.fit_predict(coords)
-        unique_labels = set(labels)
+    n_clusters = len(best_combination)
+    splitter = KMeans(n_clusters=n_clusters, random_state=42)
+    labels = splitter.fit_predict(coords)
+    unique_labels = set(labels)
     
-    # Create sub-trajectories
     split_trajectories = []
-    
-    # Get maximum existing cluster ID to ensure we create unique IDs
-    # This will work even if we don't have access to all trajectories
     base_id = traj['cluster_id']
-    id_offset = 1000  # Large offset to avoid conflicts with existing IDs
     
     for i, label in enumerate(unique_labels):
         mask = labels == label
         sub_coords = coords[mask]
         
-        if len(sub_coords) < 3:  # Need at least 3 points
+        if len(sub_coords) < 3:
             continue
             
-        # Create new trajectory
-        from sklearn.decomposition import PCA
         pca = PCA(n_components=3)
         pca.fit(sub_coords)
         
         sub_traj = traj.copy()
         
-        # Generate a new integer ID for the split trajectory
-        if isinstance(base_id, (int, np.integer)):
-            # If base_id is already an integer, use it as a base
-            new_id = base_id + id_offset * (i + 1)
-        else:
-            # If base_id is a string, try to extract a numeric part
-            try:
-                # Try to convert to int if it's a digit string
-                if isinstance(base_id, str) and base_id.isdigit():
-                    new_id = int(base_id) + id_offset * (i + 1)
-                else:
-                    # For complex string IDs, create a completely new ID
-                    new_id = 90000 + (i + 1)  # Use a high number range to avoid collisions
-            except:
-                # Fallback ID generation
-                new_id = 90000 + (i + 1)
+        # *** CRITICAL FIX: Use string-based ID like original code ***
+        new_id = f"S{i+1}_{base_id}"
         
         sub_traj['cluster_id'] = new_id
         sub_traj['electrode_count'] = len(sub_coords)
-        sub_traj['sorted_coords'] = sub_coords.tolist()
         
-        # Store split information in metadata rather than in the ID
-        sub_traj['is_split'] = True  # Flag to indicate this is a split trajectory
-        sub_traj['split_from'] = base_id  # Store original trajectory ID
-        sub_traj['split_index'] = i + 1  # Index of this split (1-based)
-        sub_traj['split_label'] = f"S{i+1}_{base_id}"  # Descriptive label (not used for computation)
+        # Store split information in metadata
+        sub_traj['is_split'] = True
+        sub_traj['split_from'] = base_id
+        sub_traj['split_index'] = i + 1
+        sub_traj['split_label'] = f"S{i+1}_{base_id}"
         
-        # Calculate direction and endpoints
+        # Sort coordinates along trajectory direction
         direction = pca.components_[0]
         center = np.mean(sub_coords, axis=0)
         projected = np.dot(sub_coords - center, direction)
         sorted_indices = np.argsort(projected)
+        sorted_coords = sub_coords[sorted_indices]
+        
+        # *** CRITICAL FIX: Store the sorted coordinates ***
+        sub_traj['sorted_coords'] = sorted_coords.tolist()
         
         sub_traj['endpoints'] = [
-            sub_coords[sorted_indices[0]].tolist(),
-            sub_coords[sorted_indices[-1]].tolist()
+            sorted_coords[0].tolist(),
+            sorted_coords[-1].tolist()
         ]
         
-        # Update other properties
         sub_traj['direction'] = direction.tolist()
         sub_traj['center'] = center.tolist()
         sub_traj['length_mm'] = float(np.linalg.norm(
-            sub_coords[sorted_indices[-1]] - sub_coords[sorted_indices[0]]
+            sorted_coords[-1] - sorted_coords[0]
         ))
+        
+        # Update linearity using PCA
+        if len(sub_coords) > 2:
+            sub_traj['linearity'] = float(pca.explained_variance_ratio_[0])
+            sub_traj['pca_variance'] = pca.explained_variance_ratio_.tolist()
+        else:
+            sub_traj['linearity'] = 1.0
+            sub_traj['pca_variance'] = [1.0, 0.0, 0.0]
+        
+        # Copy spacing validation if it exists
+        if 'spacing_validation' in traj:
+            spacing_validation = validate_electrode_spacing(
+                sorted_coords, 
+                traj['spacing_validation'].get('expected_range', (3.0, 5.0))
+            )
+            sub_traj['spacing_validation'] = spacing_validation
         
         split_trajectories.append(sub_traj)
     
-    # Only consider the split successful if we created at least 2 sub-trajectories
     success = len(split_trajectories) >= 2
     
     return {
@@ -5153,16 +5177,7 @@ def calculate_contact_angles(trajectory_points, angle_threshold=40.0):
 
 def analyze_trajectory_angles(trajectories, coords_array, results, angle_threshold=40.0):
     """
-    Analyze contact angles for all trajectories in the results.
-    
-    Args:
-        trajectories (list): List of trajectory dictionaries
-        coords_array (numpy.ndarray): Array of all electrode coordinates
-        results (dict): Results from trajectory analysis (contains graph for cluster mapping)
-        angle_threshold (float): Threshold angle to flag problematic segments
-        
-    Returns:
-        dict: Dictionary mapping trajectory IDs to angle analysis results
+    FIXED VERSION: Analyze contact angles for all trajectories including split/merged ones.
     """
     # Get cluster assignments from results
     if 'graph' not in results:
@@ -5176,24 +5191,35 @@ def analyze_trajectory_angles(trajectories, coords_array, results, angle_thresho
     for traj in trajectories:
         cluster_id = traj['cluster_id']
         
-        # Get coordinates for this trajectory
-        mask = clusters == cluster_id
-        
-        if not np.any(mask):
-            print(f"Warning: No coordinates found for trajectory {cluster_id}")
-            continue
-            
-        cluster_coords = coords_array[mask]
-        
-        # Sort coordinates along trajectory direction if we have the direction
-        if 'direction' in traj and len(cluster_coords) > 2:
-            direction = np.array(traj['direction'])
-            center = np.mean(cluster_coords, axis=0)
-            projected = np.dot(cluster_coords - center, direction)
-            sorted_indices = np.argsort(projected)
-            sorted_coords = cluster_coords[sorted_indices]
+        # *** CRITICAL FIX: Handle split/merged trajectories ***
+        # For split/merged trajectories, use sorted_coords directly instead of cluster mapping
+        if 'sorted_coords' in traj and traj['sorted_coords']:
+            sorted_coords = np.array(traj['sorted_coords'])
+            print(f"Using sorted_coords for trajectory {cluster_id} ({len(sorted_coords)} points)")
         else:
-            sorted_coords = cluster_coords
+            # Fallback to cluster mapping for regular trajectories
+            mask = clusters == cluster_id
+            
+            if not np.any(mask):
+                print(f"Warning: No coordinates found for trajectory {cluster_id} in cluster mapping")
+                continue
+                
+            cluster_coords = coords_array[mask]
+            
+            # Sort coordinates along trajectory direction if we have the direction
+            if 'direction' in traj and len(cluster_coords) > 2:
+                direction = np.array(traj['direction'])
+                center = np.mean(cluster_coords, axis=0)
+                projected = np.dot(cluster_coords - center, direction)
+                sorted_indices = np.argsort(projected)
+                sorted_coords = cluster_coords[sorted_indices]
+            else:
+                sorted_coords = cluster_coords
+        
+        # Skip trajectories with too few points
+        if len(sorted_coords) < 3:
+            print(f"Skipping trajectory {cluster_id}: only {len(sorted_coords)} points")
+            continue
         
         # Analyze angles for this trajectory
         angle_analysis = calculate_contact_angles(sorted_coords, angle_threshold)
@@ -5204,7 +5230,23 @@ def analyze_trajectory_angles(trajectories, coords_array, results, angle_thresho
         angle_analysis['trajectory_length'] = traj.get('length_mm', 0)
         angle_analysis['pca_linearity'] = traj.get('linearity', 0)
         
+        # Add trajectory type information for debugging
+        if 'is_split' in traj:
+            angle_analysis['trajectory_type'] = 'split'
+            angle_analysis['split_from'] = traj.get('split_from')
+        elif 'is_merged' in traj:
+            angle_analysis['trajectory_type'] = 'merged'
+            angle_analysis['merged_from'] = traj.get('merged_from')
+        elif 'is_hemisphere_split' in traj:
+            angle_analysis['trajectory_type'] = 'hemisphere_split'
+            angle_analysis['hemisphere'] = traj.get('hemisphere')
+        else:
+            angle_analysis['trajectory_type'] = 'original'
+        
         trajectory_angle_analyses[cluster_id] = angle_analysis
+        
+        print(f"✅ Analyzed angles for trajectory {cluster_id} ({angle_analysis['trajectory_type']}): "
+              f"{len(sorted_coords)} contacts, max curvature {angle_analysis['max_curvature']:.1f}°")
     
     return trajectory_angle_analyses
 
@@ -5802,13 +5844,8 @@ def create_flagged_segments_report(trajectory_angle_analyses, output_dir=None):
 
 def add_angle_analysis_to_trajectories(trajectories, coords_array, results, angle_threshold=40.0):
     """
-    Add angle analysis results directly to trajectory dictionaries.
-    
-    Args:
-        trajectories (list): List of trajectory dictionaries (modified in place)
-        coords_array (numpy.ndarray): Array of electrode coordinates
-        results (dict): Results from trajectory analysis
-        angle_threshold (float): Threshold angle to flag problematic segments
+    IMPROVED VERSION: Add angle analysis results directly to trajectory dictionaries.
+    Now properly handles all trajectory types.
     """
     # Perform angle analysis
     angle_analyses = analyze_trajectory_angles(trajectories, coords_array, results, angle_threshold)
@@ -5820,25 +5857,30 @@ def add_angle_analysis_to_trajectories(trajectories, coords_array, results, angl
         if traj_id in angle_analyses:
             analysis = angle_analyses[traj_id]
             
-            # Add angle analysis fields - FIXED: Use correct key names
+            # Add angle analysis fields
             traj['contact_angles'] = {
-                'curvature_angles': analysis['curvature_angles'],  # FIXED: was 'angles'
+                'curvature_angles': analysis['curvature_angles'],
                 'direction_changes': analysis['direction_changes'],
-                'max_curvature': analysis['max_curvature'],        # FIXED: was 'max_angle'
-                'mean_curvature': analysis['mean_curvature'],      # FIXED: was 'mean_angle'
-                'std_curvature': analysis['std_curvature'],        # FIXED: was 'std_angle'
+                'max_curvature': analysis['max_curvature'],
+                'mean_curvature': analysis['mean_curvature'],
+                'std_curvature': analysis['std_curvature'],
                 'max_direction_change': analysis['max_direction_change'],
                 'mean_direction_change': analysis['mean_direction_change'],
                 'cumulative_direction_change': analysis['cumulative_direction_change'],
                 'is_linear': analysis['is_linear'],
                 'linearity_score': analysis['linearity_score'],
                 'flagged_segments_count': analysis['flagged_count'],
-                'angle_threshold': analysis['angle_threshold']
+                'angle_threshold': analysis['angle_threshold'],
+                'trajectory_type': analysis.get('trajectory_type', 'unknown')  # For debugging
             }
             
             # Add flagged segments details if any
             if analysis['flagged_segments']:
                 traj['contact_angles']['flagged_segments'] = analysis['flagged_segments']
+                
+            print(f"✅ Added angle analysis to trajectory {traj_id}: "
+                  f"max curvature {analysis['max_curvature']:.1f}°, "
+                  f"linear: {analysis['is_linear']}")
         else:
             # Add empty analysis for trajectories without data
             traj['contact_angles'] = {
@@ -5853,8 +5895,57 @@ def add_angle_analysis_to_trajectories(trajectories, coords_array, results, angl
                 'is_linear': True,
                 'linearity_score': 1.0,
                 'flagged_segments_count': 0,
-                'angle_threshold': angle_threshold
+                'angle_threshold': angle_threshold,
+                'trajectory_type': 'missing_analysis'
             }
+            
+            print(f"⚠️  No angle analysis available for trajectory {traj_id}")
+
+def ensure_angle_analysis_after_refinement(results, coords_array, analyze_contact_angles=True, angle_threshold=40.0):
+    """
+    Ensure angle analysis is performed AFTER all trajectory refinement operations.
+    This should be called at the end of the main workflow.
+    """
+    if not analyze_contact_angles or 'trajectories' not in results:
+        return results
+    
+    print("Performing final angle analysis on all trajectories (including splits/merges)...")
+    
+    # Perform contact angle analysis on final trajectory set
+    trajectory_angle_analyses = analyze_trajectory_angles(
+        results['trajectories'], 
+        coords_array, 
+        results, 
+        angle_threshold=angle_threshold
+    )
+    
+    # Store analysis results
+    results['contact_angle_analysis'] = trajectory_angle_analyses
+    
+    # Add angle analysis directly to trajectory dictionaries
+    add_angle_analysis_to_trajectories(
+        results['trajectories'], 
+        coords_array, 
+        results, 
+        angle_threshold
+    )
+    
+    # Print summary
+    flagged_count = sum(1 for analysis in trajectory_angle_analyses.values() 
+                      if not analysis['is_linear'])
+    total_count = len(trajectory_angle_analyses)
+    
+    print(f"Final angle analysis complete: {flagged_count}/{total_count} trajectories flagged for non-linearity")
+    
+    # Count by trajectory type
+    type_counts = {}
+    for analysis in trajectory_angle_analyses.values():
+        traj_type = analysis.get('trajectory_type', 'unknown')
+        type_counts[traj_type] = type_counts.get(traj_type, 0) + 1
+    
+    print(f"Analyzed trajectories by type: {type_counts}")
+    
+    return results
 
 def print_angle_analysis_summary(trajectory_angle_analyses):
     """
@@ -8952,13 +9043,13 @@ def main(use_combined_volume=True, use_original_reports=True,
         
         # Step 1: Load required volumes from Slicer
         print("Loading volumes from Slicer...")
-        electrodes_volume = slicer.util.getNode('P4_electrode_mask_success_1')
-        brain_volume = slicer.util.getNode("patient4_mask_5")
+        electrodes_volume = slicer.util.getNode('P7_electrode_mask_success_1')
+        brain_volume = slicer.util.getNode("patient7_mask_5")
         
         # Create output directories
-        base_dir = r"C:\Users\rocia\Downloads\TFG\Cohort\Centroids\P5_BoltHeadandpaths_trial_success_interactive_split_hemishhere_enhanced"
+        base_dir = r"C:\Users\rocia\Downloads\TFG\Cohort\Centroids\P7_BoltHeadandpaths_trial_success_interactive_split_hemishhere_enhanced_orga"
         
-        # NEW: Include hemisphere in output directory name
+        # Include hemisphere in output directory name
         output_dir_name = "trajectory_analysis_results"
         if hemisphere.lower() != 'both':
             output_dir_name += f"_{hemisphere}_hemisphere"
@@ -9031,7 +9122,7 @@ def main(use_combined_volume=True, use_original_reports=True,
         combined_trajectories = {}
         if use_combined_volume:
             print("Performing combined volume analysis...")
-            combined_volume = slicer.util.getNode('P4_CombinedBoltHeadEntryPointsTrajectoryMask')
+            combined_volume = slicer.util.getNode('P7_CombinedBoltHeadEntryPointsTrajectoryMask')
             
             if combined_volume:
                 # Extract trajectories from combined volume
@@ -9077,7 +9168,7 @@ def main(use_combined_volume=True, use_original_reports=True,
         
         # Step 4: Get entry points if available and filter by hemisphere
         entry_points = None
-        entry_points_volume = slicer.util.getNode('P4_brain_entry_points')
+        entry_points_volume = slicer.util.getNode('P7_brain_entry_points')
         if entry_points_volume:
             all_entry_centroids_ras = get_all_centroids(entry_points_volume)
             if all_entry_centroids_ras:
@@ -9382,6 +9473,52 @@ def main(use_combined_volume=True, use_original_reports=True,
             for count, num in validation_summary['by_size'].items():
                 if num > 0:
                     print(f"  • {count}-contact electrodes: {num}")
+
+
+        if analyze_contact_angles:
+            print("Analyzing contact angles (FINAL - after all refinements)...")
+            
+            # Use the improved angle analysis function with CORRECT variable name
+            integrated_results = ensure_angle_analysis_after_refinement(
+                integrated_results,  # ← FIXED: Use correct variable name
+                coords_array, 
+                analyze_contact_angles=True, 
+                angle_threshold=angle_threshold
+            )
+            
+            # Get the analysis results with CORRECT variable name
+            trajectory_angle_analyses = integrated_results.get('contact_angle_analysis', {})
+            
+            # Store in all_results for later use
+            all_results['contact_angle_analysis'] = trajectory_angle_analyses
+            
+            # Print detailed summary
+            print_angle_analysis_summary(trajectory_angle_analyses)
+            
+            flagged_count = sum(1 for analysis in trajectory_angle_analyses.values() 
+                              if not analysis['is_linear'])
+            total_count = len(trajectory_angle_analyses)
+            
+            # Store angle summary for later reporting
+            angle_summary = {
+                'total_trajectories': total_count,
+                'flagged_trajectories': flagged_count,
+                'flagged_percentage': flagged_count/total_count*100 if total_count > 0 else 0
+            }
+            
+            print(f"Contact angles: {flagged_count}/{total_count} trajectories flagged for non-linearity")
+            
+            # Create minimal angle visualization if reports enabled
+            if use_original_reports:
+                angle_fig = create_angle_analysis_visualization_minimal(trajectory_angle_analyses, output_dir)
+                if angle_fig:
+                    plt.close(angle_fig)
+        else:
+            angle_summary = None
+        
+        # Store integrated results (AFTER angle analysis is complete)
+        all_results['integrated_analysis'] = integrated_results
+        print(f"Identified {integrated_results.get('n_trajectories', 0)} trajectories through clustering.")
         
         # Step 7: Duplicate analysis (if requested)
         if detect_duplicates:
@@ -9431,7 +9568,7 @@ def main(use_combined_volume=True, use_original_reports=True,
         
         # Step 8: Get bolt directions and filter by hemisphere
         bolt_directions = None
-        bolt_head_volume = slicer.util.getNode('P4_bolt_heads')
+        bolt_head_volume = slicer.util.getNode('P7_bolt_heads')
         
         if bolt_head_volume and entry_points_volume:
             print("Extracting bolt-to-entry directions...")
@@ -9475,8 +9612,7 @@ def main(use_combined_volume=True, use_original_reports=True,
                     }
                 
                 # NEW: Apply hemisphere filtering to bolt directions
-                # (This is already done above when filtering combined_trajectories, 
-                # but we ensure consistency here)
+            
                 bolt_directions = filter_bolt_directions_by_hemisphere(
                     bolt_directions, hemisphere, verbose=False  # Already printed above
                 )
@@ -9707,6 +9843,8 @@ def main(use_combined_volume=True, use_original_reports=True,
             print(f"- Trajectory refinement: {refinement['original_count']} original -> {refinement['n_trajectories']} final trajectories")
             print(f"- Merged trajectories: {refinement['merged_count']}")
             print(f"- Split trajectories: {refinement['split_count']}")
+
+
         
         # Add duplicate analysis summary if performed
         if detect_duplicates and 'duplicate_summary' in all_results:
@@ -9817,6 +9955,17 @@ def main(use_combined_volume=True, use_original_reports=True,
                 print(f"Error creating final scoring report: {e}")
                 import traceback
                 traceback.print_exc()
+        if analyze_contact_angles and angle_summary:  # ← Check angle_summary exists
+            print(f"- Contact angle analysis: {angle_summary['flagged_trajectories']} of {angle_summary['total_trajectories']} trajectories "
+                  f"({angle_summary['flagged_percentage']:.1f}%) flagged for non-linearity (>{angle_threshold}°)")
+            
+            # Calculate overall statistics from the stored analysis
+            if 'contact_angle_analysis' in all_results:
+                angle_analyses = all_results['contact_angle_analysis']
+                all_max_angles = [a['max_curvature'] for a in angle_analyses.values()]
+                if all_max_angles:
+                    print(f"- Maximum angle deviation: {max(all_max_angles):.1f}°")
+                    print(f"- Mean maximum angle: {np.mean(all_max_angles):.1f}°")
         
         return all_results
         

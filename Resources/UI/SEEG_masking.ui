@@ -7,16 +7,19 @@
     <x>0</x>
     <y>0</y>
     <width>469</width>
-    <height>351</height>
+    <height>772</height>
    </rect>
   </property>
+  <property name="autoFillBackground">
+   <bool>false</bool>
+  </property>
   <layout class="QGridLayout" name="gridLayout">
-   <item row="0" column="0">
+   <item row="3" column="0">
     <widget class="ctkCollapsibleButton" name="inputsCollapsibleButton">
      <property name="text">
       <string>1. Mask Creation</string>
      </property>
-     <layout class="QFormLayout" name="formLayout_2">
+     <layout class="QGridLayout" name="gridLayout_3">
       <item row="0" column="0">
        <widget class="QLabel" name="label">
         <property name="text">
@@ -48,26 +51,6 @@
         </property>
         <property name="SlicerParameterName" stdset="0">
          <string>inputVolume</string>
-        </property>
-       </widget>
-      </item>
-      <item row="3" column="0" colspan="2">
-       <widget class="QPushButton" name="applyButton">
-        <property name="enabled">
-         <bool>true</bool>
-        </property>
-        <property name="toolTip">
-         <string>Run the algorithm.</string>
-        </property>
-        <property name="text">
-         <string>✅ Apply Masking Norm (the electrodes are gonna be here)</string>
-        </property>
-       </widget>
-      </item>
-      <item row="4" column="0" colspan="2">
-       <widget class="QPushButton" name="saveButton">
-        <property name="text">
-         <string>Save mask</string>
         </property>
        </widget>
       </item>
@@ -103,13 +86,33 @@
         </property>
        </widget>
       </item>
+      <item row="2" column="0" colspan="2">
+       <widget class="QPushButton" name="applyButton">
+        <property name="enabled">
+         <bool>true</bool>
+        </property>
+        <property name="toolTip">
+         <string>Run the algorithm.</string>
+        </property>
+        <property name="text">
+         <string>✅ Apply Masking Norm (the electrodes are gonna be here)</string>
+        </property>
+       </widget>
+      </item>
+      <item row="3" column="0">
+       <widget class="QPushButton" name="saveButton">
+        <property name="text">
+         <string>Save mask</string>
+        </property>
+       </widget>
+      </item>
      </layout>
     </widget>
    </item>
-   <item row="1" column="0">
+   <item row="5" column="0">
     <widget class="ctkCollapsibleButton" name="CollapsibleButton_2">
      <property name="text">
-      <string>2. Mask creation if your scan has mores tissues apart from the brain 💀</string>
+      <string>3. Mask creation if your scan has mores tissues apart from the brain 💀</string>
      </property>
      <layout class="QGridLayout" name="gridLayout_2">
       <item row="1" column="0" colspan="2">
@@ -145,11 +148,117 @@
      </layout>
     </widget>
    </item>
-   <item row="2" column="0">
-    <widget class="ctkCollapsibleButton" name="CollapsibleButton">
+   <item row="0" column="0">
+    <widget class="ctkCollapsibleButton" name="CollapsibleButton_3">
      <property name="text">
-      <string>CollapsibleButton</string>
+      <string>Output Settings (Optional)</string>
      </property>
+     <property name="collapsed">
+      <bool>true</bool>
+     </property>
+     <layout class="QFormLayout" name="formLayout">
+      <item row="0" column="0">
+       <widget class="QLineEdit" name="folderNameLineEdit">
+        <property name="text">
+         <string>e.g., Patient_123, Study_A, etc. (leave empty for auto-date)</string>
+        </property>
+       </widget>
+      </item>
+      <item row="1" column="0">
+       <widget class="QLabel" name="label_4">
+        <property name="text">
+         <string>• Fixed location: Documents/SEEG_Results/[your_folder_name]/
+• Default folder name: results_dd_mm_yy</string>
+        </property>
+       </widget>
+      </item>
+      <item row="2" column="0">
+       <widget class="QPushButton" name="showPathButton">
+        <property name="enabled">
+         <bool>true</bool>
+        </property>
+        <property name="text">
+         <string>Show Path</string>
+        </property>
+       </widget>
+      </item>
+     </layout>
+    </widget>
+   </item>
+   <item row="4" column="0">
+    <widget class="ctkCollapsibleButton" name="confidenceCollapsibleButton">
+     <property name="enabled">
+      <bool>true</bool>
+     </property>
+     <property name="text">
+      <string>Electrode Confidence Viewer</string>
+     </property>
+     <property name="collapsed">
+      <bool>false</bool>
+     </property>
+     <layout class="QGridLayout" name="gridLayout_5">
+      <item row="0" column="0">
+       <widget class="QWidget" name="confidenceViewerWidget" native="true">
+        <property name="autoFillBackground">
+         <bool>false</bool>
+        </property>
+        <layout class="QGridLayout" name="gridLayout_4">
+         <item row="0" column="0" colspan="3">
+          <widget class="QLabel" name="label_5">
+           <property name="text">
+            <string> 📊 Status: Waiting for confidence analysis...</string>
+           </property>
+          </widget>
+         </item>
+         <item row="1" column="0">
+          <widget class="QLabel" name="thresholdValueLabel">
+           <property name="text">
+            <string>Threshold: 15</string>
+           </property>
+          </widget>
+         </item>
+         <item row="1" column="1" colspan="2">
+          <widget class="QSlider" name="confidenceThresholdSlider">
+           <property name="sliderPosition">
+            <number>15</number>
+           </property>
+           <property name="orientation">
+            <enum>Qt::Horizontal</enum>
+           </property>
+          </widget>
+         </item>
+         <item row="1" column="3">
+          <widget class="QLabel" name="label_6">
+           <property name="text">
+            <string>100%</string>
+           </property>
+          </widget>
+         </item>
+         <item row="2" column="0" colspan="2">
+          <widget class="QLabel" name="quickStatsLabel">
+           <property name="text">
+            <string>0 electrodes visible</string>
+           </property>
+          </widget>
+         </item>
+         <item row="3" column="1">
+          <widget class="QPushButton" name="refreshPointsButton">
+           <property name="text">
+            <string>Refresh</string>
+           </property>
+          </widget>
+         </item>
+         <item row="3" column="2" colspan="2">
+          <widget class="QPushButton" name="clearPointsButton">
+           <property name="text">
+            <string>Clear Points</string>
+           </property>
+          </widget>
+         </item>
+        </layout>
+       </widget>
+      </item>
+     </layout>
     </widget>
    </item>
   </layout>

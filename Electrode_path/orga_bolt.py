@@ -8901,11 +8901,11 @@ def main(use_combined_volume=True, use_original_reports=True,
         
         # Step 1: Load required volumes from Slicer
         print("Loading volumes from Slicer...")
-        electrodes_volume = slicer.util.getNode('P5_electrode_mask_success_1')
-        brain_volume = slicer.util.getNode("patient5_mask_5")
+        electrodes_volume = slicer.util.getNode('P3_electrode_mask_success_1')
+        brain_volume = slicer.util.getNode("patient3_mask_5")
         
         # Create output directories
-        base_dir = r"C:\Users\rocia\Downloads\TFG\Cohort\Centroids\P5_BoltHeadandpaths_trial_success_interactive_split_hemishhere"
+        base_dir = r"C:\Users\rocia\Downloads\TFG\Cohort\Centroids\P3_BoltHeadandpaths_trial_success_interactive_split_hemishhere_previous"
         
         # NEW: Include hemisphere in output directory name
         output_dir_name = "trajectory_analysis_results"
@@ -8980,7 +8980,7 @@ def main(use_combined_volume=True, use_original_reports=True,
         combined_trajectories = {}
         if use_combined_volume:
             print("Performing combined volume analysis...")
-            combined_volume = slicer.util.getNode('P5_CombinedBoltHeadEntryPointsTrajectoryMask')
+            combined_volume = slicer.util.getNode('P3_CombinedBoltHeadEntryPointsTrajectoryMask')
             
             if combined_volume:
                 # Extract trajectories from combined volume
@@ -9026,7 +9026,7 @@ def main(use_combined_volume=True, use_original_reports=True,
         
         # Step 4: Get entry points if available and filter by hemisphere
         entry_points = None
-        entry_points_volume = slicer.util.getNode('P5_brain_entry_points')
+        entry_points_volume = slicer.util.getNode('P3_brain_entry_points')
         if entry_points_volume:
             all_entry_centroids_ras = get_all_centroids(entry_points_volume)
             if all_entry_centroids_ras:
@@ -9380,7 +9380,7 @@ def main(use_combined_volume=True, use_original_reports=True,
         
         # Step 8: Get bolt directions and filter by hemisphere
         bolt_directions = None
-        bolt_head_volume = slicer.util.getNode('P5_bolt_heads')
+        bolt_head_volume = slicer.util.getNode('P3_bolt_heads')
         
         if bolt_head_volume and entry_points_volume:
             print("Extracting bolt-to-entry directions...")
