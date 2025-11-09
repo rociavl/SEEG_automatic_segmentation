@@ -889,7 +889,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 ## Contact
 
 **Rocío Ávalos Morillas**
-*Biomedical Engineering Student*
+*Biomedical Engineer*
 *Universitat Politècnica de Catalunya (UPC)*
 
 - 📧 Email: rocio.avalos029@gmail.com
