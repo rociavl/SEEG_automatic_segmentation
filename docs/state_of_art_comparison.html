@@ -1,0 +1,442 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>State-of-the-Art Comparison</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
+            color: white;
+            min-height: 100vh;
+        }
+        
+        .slide-container {
+            max-width: 1500px;
+            margin: 0 auto;
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            border-radius: 20px;
+            padding: 40px;
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.3);
+        }
+        
+        h1 {
+            font-size: 3rem;
+            text-align: center;
+            margin-bottom: 40px;
+            text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.3);
+            background: linear-gradient(45deg, #f093fb, #f5576c);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        
+        .revolution-banner {
+            background: linear-gradient(135deg, #f093fb, #f5576c);
+            padding: 30px;
+            border-radius: 15px;
+            margin-bottom: 40px;
+            text-align: center;
+            border: 3px solid rgba(255, 255, 255, 0.3);
+            box-shadow: 0 15px 30px rgba(0, 0, 0, 0.2);
+        }
+        
+        .revolution-text {
+            font-size: 1.5rem;
+            font-weight: bold;
+            margin: 0;
+            text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.3);
+        }
+        
+        .comparison-grid {
+            display: grid;
+            grid-template-columns: 1fr 2px 1fr;
+            gap: 40px;
+            margin-bottom: 40px;
+            align-items: start;
+        }
+        
+        .divider {
+            background: linear-gradient(to bottom, #f093fb, #f5576c);
+            border-radius: 2px;
+            height: 100%;
+            min-height: 600px;
+        }
+        
+        .existing-methods, .our-approach {
+            background: rgba(255, 255, 255, 0.1);
+            padding: 30px;
+            border-radius: 15px;
+            border: 2px solid rgba(255, 255, 255, 0.2);
+            height: fit-content;
+        }
+        
+        .existing-methods {
+            border-left: 5px solid #ff6b6b;
+        }
+        
+        .our-approach {
+            border-left: 5px solid #4ecdc4;
+        }
+        
+        h2 {
+            font-size: 2rem;
+            margin-bottom: 25px;
+            border-bottom: 2px solid;
+            padding-bottom: 10px;
+        }
+        
+        .existing-methods h2 {
+            color: #ff6b6b;
+            border-bottom-color: #ff6b6b;
+        }
+        
+        .our-approach h2 {
+            color: #4ecdc4;
+            border-bottom-color: #4ecdc4;
+        }
+        
+        .method-card {
+            background: rgba(255, 255, 255, 0.08);
+            padding: 20px;
+            border-radius: 12px;
+            margin: 20px 0;
+            border-left: 4px solid;
+        }
+        
+        .method-card.existing {
+            border-left-color: #ff6b6b;
+        }
+        
+        .method-card.ours {
+            border-left-color: #4ecdc4;
+        }
+        
+        .method-name {
+            font-size: 1.3rem;
+            font-weight: bold;
+            margin-bottom: 10px;
+        }
+        
+        .existing .method-name {
+            color: #ff6b6b;
+        }
+        
+        .ours .method-name {
+            color: #4ecdc4;
+        }
+        
+        .limitations-list, .advantages-list {
+            list-style: none;
+            padding: 0;
+            margin: 15px 0;
+        }
+        
+        .limitations-list li {
+            background: rgba(255, 107, 107, 0.1);
+            margin: 8px 0;
+            padding: 10px 15px;
+            border-radius: 8px;
+            border-left: 3px solid #ff6b6b;
+            font-size: 0.9rem;
+        }
+        
+        .limitations-list li::before {
+            content: "❌";
+            margin-right: 10px;
+        }
+        
+        .advantages-list li {
+            background: rgba(78, 205, 196, 0.1);
+            margin: 8px 0;
+            padding: 10px 15px;
+            border-radius: 8px;
+            border-left: 3px solid #4ecdc4;
+            font-size: 0.9rem;
+        }
+        
+        .advantages-list li::before {
+            content: "✅";
+            margin-right: 10px;
+        }
+        
+        .performance-comparison {
+            background: rgba(255, 255, 255, 0.1);
+            padding: 30px;
+            border-radius: 15px;
+            margin-top: 30px;
+        }
+        
+        .performance-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 20px;
+            margin-top: 25px;
+        }
+        
+        .performance-metric {
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            padding: 20px;
+            border-radius: 12px;
+            text-align: center;
+            box-shadow: 0 8px 16px rgba(0, 0, 0, 0.2);
+        }
+        
+        .metric-value {
+            font-size: 2rem;
+            font-weight: bold;
+            color: #f093fb;
+            margin-bottom: 8px;
+        }
+        
+        .metric-label {
+            font-size: 0.9rem;
+            opacity: 0.9;
+            line-height: 1.3;
+        }
+        
+        .breakthrough-section {
+            background: rgba(255, 255, 255, 0.1);
+            padding: 25px;
+            border-radius: 15px;
+            margin-top: 30px;
+            border: 2px solid #4ecdc4;
+        }
+        
+        .breakthrough-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 20px;
+        }
+        
+        .breakthrough-item {
+            background: linear-gradient(135deg, #4ecdc4, #44a08d);
+            padding: 20px;
+            border-radius: 12px;
+            text-align: center;
+            box-shadow: 0 8px 16px rgba(0, 0, 0, 0.2);
+        }
+        
+        .breakthrough-title {
+            font-size: 1.2rem;
+            font-weight: bold;
+            margin-bottom: 10px;
+            color: white;
+        }
+        
+        .breakthrough-desc {
+            font-size: 0.95rem;
+            opacity: 0.9;
+            line-height: 1.4;
+        }
+        
+        .innovation-highlight {
+            background: linear-gradient(135deg, #f093fb, #f5576c);
+            padding: 20px;
+            border-radius: 12px;
+            margin: 20px 0;
+            text-align: center;
+        }
+        
+        .innovation-highlight h3 {
+            margin: 0 0 10px 0;
+            font-size: 1.4rem;
+            color: white;
+        }
+        
+        .innovation-highlight p {
+            margin: 0;
+            font-size: 1.1rem;
+            opacity: 0.95;
+        }
+        
+        .workflow-comparison {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 30px;
+            margin: 30px 0;
+        }
+        
+        .workflow-existing, .workflow-ours {
+            background: rgba(255, 255, 255, 0.08);
+            padding: 20px;
+            border-radius: 12px;
+        }
+        
+        .workflow-step {
+            background: rgba(255, 255, 255, 0.1);
+            padding: 15px;
+            margin: 10px 0;
+            border-radius: 8px;
+            border-left: 4px solid;
+        }
+        
+        .workflow-existing .workflow-step {
+            border-left-color: #ff6b6b;
+        }
+        
+        .workflow-ours .workflow-step {
+            border-left-color: #4ecdc4;
+        }
+    </style>
+</head>
+<body>
+    <div class="slide-container">
+        <h1>State-of-the-Art Comparison</h1>
+        
+        <div class="revolution-banner">
+            <p class="revolution-text">🚀 BREAKTHROUGH: First Semi-Automated SEEG System 🚀</p>
+        </div>
+        
+        <div class="comparison-grid">
+            <div class="existing-methods">
+                <h2>❌ Current State-of-the-Art Limitations</h2>
+                
+                <div class="method-card existing">
+                    <div class="method-name">SEEGA (SEEG Assistant)</div>
+                    <ul class="limitations-list">
+                        <li><strong>Manual fiducial lists required</strong> - Users must provide anatomical landmarks</li>
+                        <li><strong>Performance sensitive</strong> to threshold and parameter settings</li>
+                        <li><strong>Semi-automatic design</strong> - Requires constant user supervision</li>
+                        <li><strong>Manual initialization</strong> for each electrode</li>
+                    </ul>
+                </div>
+                
+                <div class="method-card existing">
+                    <div class="method-name">BrainQuake</div>
+                    <ul class="limitations-list">
+                        <li><strong>Manual region-of-interest selection</strong> required</li>
+                        <li><strong>Struggles with closely spaced</strong> or overlapping contacts</li>
+                        <li><strong>User initialization dependency</strong> for each case</li>
+                        <li><strong>Technical expertise required</strong> - Not clinician-friendly</li>
+                    </ul>
+                </div>
+                
+                <div class="method-card existing">
+                    <div class="method-name">Recent Deep Learning Approaches</div>
+                    <ul class="limitations-list">
+                        <li><strong>Limited edge contact detection</strong> - Miss boundary electrodes</li>
+                        <li><strong>Large annotated datasets required</strong> - Training dependency</li>
+                        <li><strong>Segmentation only</strong> - No complete workflow integration</li>
+                        <li><strong>No clinical deployment</strong> frameworks</li>
+                    </ul>
+                </div>
+                
+                <div class="innovation-highlight">
+                    <h3>🔥 Universal Problem</h3>
+                    <p><strong>ALL existing methods require manual initialization, fiducial lists, or technical expertise!</strong></p>
+                </div>
+            </div>
+            
+            <div class="divider"></div>
+            
+            <div class="our-approach">
+                <h2>✅ Our Novel Solution</h2>
+                
+                <div class="method-card ours">
+                    <div class="method-name">First Semi-Automated SEEG System</div>
+                    <ul class="advantages-list">
+                        <li><strong>ZERO manual initialization</strong> - Load CT scan and run</li>
+                        <li><strong>NO fiducial lists required</strong> - Complete automation</li>
+                        <li><strong>NO parameter tuning</strong> - Adaptive algorithms</li>
+                        <li><strong>NO technical expertise needed</strong> - Clinician-friendly interface</li>
+                    </ul>
+                </div>
+                
+                <div class="method-card ours">
+                    <div class="method-name">Complete End-to-End Pipeline</div>
+                    <ul class="advantages-list">
+                        <li><strong>Automated brain extraction</strong> - 93.6% Dice coefficient</li>
+                        <li><strong>Multi-mask ensemble</strong> - 38 variant consensus</li>
+                        <li><strong>Confidence scoring</strong> - Graduated clinical support</li>
+                        <li><strong>Trajectory reconstruction</strong> - Complete pathways</li>
+                    </ul>
+                </div>
+                
+                <div class="method-card ours">
+                    <div class="method-name">Clinical Integration Ready</div>
+                    <ul class="advantages-list">
+                        <li><strong>3D Slicer integration</strong> - Existing hospital workflows</li>
+                        <li><strong>Human-AI collaboration</strong> - Preserves clinical authority</li>
+                        <li><strong>Quality control systems</strong> - Automatic flagging</li>
+                        <li><strong>Real deployment</strong> at Hospital del Mar</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+        
+        <div class="workflow-comparison">
+            <div class="workflow-existing">
+                <h3 style="color: #ff6b6b; text-align: center;">❌ Traditional Workflow</h3>
+                <div class="workflow-step">1. Load CT scan</div>
+                <div class="workflow-step">2. <strong>Manually create fiducial lists</strong></div>
+                <div class="workflow-step">3. <strong>Define ROIs manually</strong></div>
+                <div class="workflow-step">4. <strong>Tune parameters per case</strong></div>
+                <div class="workflow-step">5. <strong>Manual electrode initialization</strong></div>
+                <div class="workflow-step">6. Run semi-automatic algorithm</div>
+                <div class="workflow-step">7. <strong>Manual supervision & correction</strong></div>
+                <div class="workflow-step">8. <strong>Expert validation required</strong></div>
+            </div>
+            
+            <div class="workflow-ours">
+                <h3 style="color: #4ecdc4; text-align: center;">✅ Our Automated Workflow</h3>
+                <div class="workflow-step">1. Load CT scan</div>
+                <div class="workflow-step">2. <strong>Press "RUN" button</strong></div>
+                <div class="workflow-step">3. ☕ Get coffee (15 minutes)</div>
+                <div class="workflow-step">4. Review confidence-scored results</div>
+                <div class="workflow-step">5. <strong>Done! Complete trajectories ready</strong></div>
+            </div>
+        </div>
+        
+        <div class="performance-comparison">
+            <h2 style="color: #f093fb; text-align: center;">📊 Performance Superiority</h2>
+            
+            <div class="performance-grid">
+                <div class="performance-metric">
+                    <div class="metric-value">98.8%</div>
+                    <div class="metric-label">Accuracy within 2mm clinical threshold</div>
+                </div>
+                
+                <div class="performance-metric">
+                    <div class="metric-value">0.33mm</div>
+                    <div class="metric-label">Mean localization precision</div>
+                </div>
+                
+                <div class="performance-metric">
+                    <div class="metric-value">4h → 15min</div>
+                    <div class="metric-label">Time reduction (95% faster)</div>
+                </div>
+                
+                <div class="performance-metric">
+                    <div class="metric-value">75%</div>
+                    <div class="metric-label">Trajectory success rate</div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="breakthrough-section">
+            <h2 style="color: #4ecdc4; text-align: center;">🎯 Key Breakthroughs</h2>
+            
+            <div class="breakthrough-grid">
+                <div class="breakthrough-item">
+                    <div class="breakthrough-title">Zero Initialization</div>
+                    <div class="breakthrough-desc">First semi-automated system requiring no manual setup, fiducials, or preprocessing</div>
+                </div>
+                
+                <div class="breakthrough-item">
+                    <div class="breakthrough-title">Multi-Algorithm Consensus</div>
+                    <div class="breakthrough-desc">Novel DBSCAN + Louvain hybrid approach for robust trajectory reconstruction</div>
+                </div>
+                
+                <div class="breakthrough-item">
+                    <div class="breakthrough-title">Clinical Deployment</div>
+                    <div class="breakthrough-desc">Actually implemented and used in real clinical practice at Hospital del Mar</div>
+                </div>
+            </div>
+        </div>
+    </div>
+</body>
+</html>

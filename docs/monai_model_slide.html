@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MONAI 3D U-Net Model</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            min-height: 100vh;
+        }
+        
+        .slide-container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            border-radius: 20px;
+            padding: 40px;
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.3);
+        }
+        
+        h1 {
+            font-size: 3rem;
+            text-align: center;
+            margin-bottom: 40px;
+            text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.3);
+            background: linear-gradient(45deg, #64ffda, #00e676);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        
+        .content-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 40px;
+            margin-bottom: 40px;
+        }
+        
+        .architecture-section, .performance-section {
+            background: rgba(255, 255, 255, 0.1);
+            padding: 30px;
+            border-radius: 15px;
+            border: 2px solid rgba(255, 255, 255, 0.2);
+        }
+        
+        h2 {
+            font-size: 2rem;
+            margin-bottom: 20px;
+            color: #64ffda;
+            border-bottom: 2px solid #64ffda;
+            padding-bottom: 10px;
+        }
+        
+        .architecture-details {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+            margin-bottom: 25px;
+        }
+        
+        .detail-box {
+            background: rgba(255, 255, 255, 0.05);
+            padding: 15px;
+            border-radius: 10px;
+            border-left: 4px solid #64ffda;
+        }
+        
+        .detail-box h3 {
+            margin: 0 0 10px 0;
+            font-size: 1.2rem;
+            color: #ffffff;
+        }
+        
+        .detail-box p {
+            margin: 0;
+            font-size: 0.95rem;
+            line-height: 1.4;
+        }
+        
+        .performance-metrics {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 20px;
+        }
+        
+        .metric-card {
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            padding: 20px;
+            border-radius: 12px;
+            text-align: center;
+            box-shadow: 0 8px 16px rgba(0, 0, 0, 0.2);
+        }
+        
+        .metric-value {
+            font-size: 2.5rem;
+            font-weight: bold;
+            color: #64ffda;
+            margin-bottom: 5px;
+        }
+        
+        .metric-label {
+            font-size: 1rem;
+            opacity: 0.9;
+        }
+        
+        .training-section {
+            background: rgba(255, 255, 255, 0.08);
+            padding: 25px;
+            border-radius: 15px;
+            margin-top: 30px;
+        }
+        
+        .training-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 20px;
+        }
+        
+        .training-item {
+            background: rgba(255, 255, 255, 0.1);
+            padding: 15px;
+            border-radius: 10px;
+            text-align: center;
+        }
+        
+        .training-item h4 {
+            margin: 0 0 10px 0;
+            color: #64ffda;
+            font-size: 1.1rem;
+        }
+        
+        .benefits-list {
+            list-style: none;
+            padding: 0;
+        }
+        
+        .benefits-list li {
+            background: rgba(255, 255, 255, 0.1);
+            margin: 10px 0;
+            padding: 12px 20px;
+            border-radius: 8px;
+            border-left: 4px solid #00e676;
+            position: relative;
+        }
+        
+        .benefits-list li::before {
+            content: "✓";
+            color: #00e676;
+            font-weight: bold;
+            margin-right: 10px;
+        }
+        
+        .code-snippet {
+            background: rgba(0, 0, 0, 0.3);
+            padding: 15px;
+            border-radius: 8px;
+            font-family: 'Courier New', monospace;
+            font-size: 0.9rem;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            margin: 15px 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="slide-container">
+        <h1>MONAI 3D U-Net Brain Segmentation</h1>
+        
+        <div class="content-grid">
+            <div class="architecture-section">
+                <h2>🏗️ Architecture & Implementation</h2>
+                
+                <div class="architecture-details">
+                    <div class="detail-box">
+                        <h3>Network Structure</h3>
+                        <p>5 hierarchical levels<br>
+                        Channels: 32→64→128→256→512<br>
+                        Encoder-decoder with skip connections</p>
+                    </div>
+                    
+                    <div class="detail-box">
+                        <h3>Framework</h3>
+                        <p>MONAI 1.4.0 toolkit<br>
+                        PyTorch backend<br>
+                        Medical imaging specialized</p>
+                    </div>
+                    
+                    <div class="detail-box">
+                        <h3>Regularization</h3>
+                        <p>Dropout: 0.5 rate<br>
+                        Instance normalization<br>
+                        LeakyReLU (slope=0.01)</p>
+                    </div>
+                    
+                    <div class="detail-box">
+                        <h3>Input/Output</h3>
+                        <p>Single-channel 3D CT volume<br>
+                        Binary brain mask output<br>
+                        HU normalization [-1000,1000]→[0,1]</p>
+                    </div>
+                </div>
+                
+                <div class="code-snippet">
+<strong>Data Preprocessing:</strong><br>
+I_normalized = clip((I_raw - (-1000))/2000, 0, 1)<br>
+<strong>Binary Output:</strong><br>
+M_binary = I(σ(M_raw) > 0.5)
+                </div>
+            </div>
+            
+            <div class="performance-section">
+                <h2>📊 Performance Results</h2>
+                
+                <div class="performance-metrics">
+                    <div class="metric-card">
+                        <div class="metric-value">93.6%</div>
+                        <div class="metric-label">Final Model<br>Dice Score</div>
+                    </div>
+                    
+                    <div class="metric-card">
+                        <div class="metric-value">90.8%</div>
+                        <div class="metric-label">External<br>Validation</div>
+                    </div>
+                    
+                    <div class="metric-card">
+                        <div class="metric-value">40.1%</div>
+                        <div class="metric-label">Performance<br>Improvement</div>
+                    </div>
+                    
+                    <div class="metric-card">
+                        <div class="metric-value">96.9%</div>
+                        <div class="metric-label">Variance<br>Reduction</div>
+                    </div>
+                </div>
+                
+                <ul class="benefits-list">
+                    <li>Eliminates extra-cranial artifacts</li>
+                    <li>Essential spatial constraint for electrode detection</li>
+                    <li>Consistent performance across all patients</li>
+                    <li>Automated brain tissue segmentation from CT</li>
+                </ul>
+            </div>
+        </div>
+        
+        <div class="training-section">
+            <h2>🎯 Training Strategy</h2>
+            <div class="training-grid">
+                <div class="training-item">
+                    <h4>Loss Function</h4>
+                    <p><strong>Composite Loss:</strong><br>
+                    0.8×Dice + 0.2×BCE<br>
+                    Handles class imbalance</p>
+                </div>
+                
+                <div class="training-item">
+                    <h4>Optimization</h4>
+                    <p><strong>AdamW Optimizer:</strong><br>
+                    LR: 1×10⁻⁴→1×10⁻⁵<br>
+                    Weight decay: 1×10⁻⁵</p>
+                </div>
+                
+                <div class="training-item">
+                    <h4>Data Augmentation</h4>
+                    <p><strong>Strategic Pipeline:</strong><br>
+                    Flipping (60%), Rotation (60%)<br>
+                    Gaussian noise (30%)</p>
+                </div>
+                
+                <div class="training-item">
+                    <h4>Validation</h4>
+                    <p><strong>LOOCV Strategy:</strong><br>
+                    Leave-One-Out Cross-validation<br>
+                    8-fold patient-wise split</p>
+                </div>
+                
+                <div class="training-item">
+                    <h4>Ground Truth</h4>
+                    <p><strong>Multi-threshold Consensus:</strong><br>
+                    7 mask variants per patient<br>
+                    Averaged for robustness</p>
+                </div>
+                
+                <div class="training-item">
+                    <h4>Clinical Impact</h4>
+                    <p><strong>Direct Benefits:</strong><br>
+                    Reduced false positives<br>
+                    Focused analysis region</p>
+                </div>
+            </div>
+        </div>
+    </div>
+</body>
+</html>
