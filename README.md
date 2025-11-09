@@ -14,6 +14,8 @@
 
 This repository contains the core algorithms, software architecture, and implementation details for automated SEEG (Stereoelectroencephalography) electrode localization and trajectory reconstruction. The system employs a novel multi-stage ensemble approach combining deep learning-based brain extraction, adaptive image enhancement, global voting consensus, and machine learning-based confidence estimation to achieve sub-millimeter localization accuracy (mean error: 0.33 mm).
 
+🌐 **[View Project Website](https://rociavl.github.io/SEEG_automatic_segmentation/)** - Professional presentation with thesis, technical documentation, and repository ecosystem.
+
 **For end-users and clinical deployment**, please refer to [SlicerSEEG](https://github.com/rociavl/SlicerSEEG) - the production-ready 3D Slicer extension.
 
 **For complete research documentation**, see the [full bachelor's thesis](docs/SEEG_medical_software_detection_Rocio_Avalos.pdf) included in this repository.
@@ -912,6 +914,7 @@ The software is provided "as is" without warranty. Clinical decisions must be ma
 
 ---
 
+**Project Website**: [https://rociavl.github.io/SEEG_automatic_segmentation/](https://rociavl.github.io/SEEG_automatic_segmentation/)
 **Repository**: [SEEG_automatic_segmentation](https://github.com/rociavl/SEEG_automatic_segmentation)
 **Production Extension**: [SlicerSEEG](https://github.com/rociavl/SlicerSEEG)
 **Full Thesis**: [SEEG Medical Software Detection](docs/SEEG_medical_software_detection_Rocio_Avalos.pdf)
